@@ -73,42 +73,106 @@ export async function createDataset(
   name: string,
   description = '',
 ): Promise<{ id: string }> {
+  // chunk_token_num=256 keeps Ragflow's naive splitter under the 512-token
+  // input window of bge-m3-embed@Ollama on .110. The default 512 chunks can
+  // exceed the embedder's context and fail with "input length exceeds context".
   const res = await request<{ data: { id: string } }>(`/api/v1/datasets`, {
     method: 'POST',
-    body: JSON.stringify({ name, description, embedding_model: 'bge-m3-embed@Ollama' }),
+    body: JSON.stringify({
+      name,
+      description,
+      embedding_model: 'bge-m3-embed@Ollama',
+      parser_config: { chunk_token_num: 256 },
+    }),
   });
   return res.data;
 }
 
 // === Documents ===
 
-export type DocRunStatus = '0' | '1' | '2' | '3' | '4';
-// 0 pending, 1 parsing, 2 splitting, 3 indexing, 4 done; or 'FAIL' string
+export type RagflowRunStatus = 'UNSTART' | 'RUNNING' | 'CANCEL' | 'DONE' | 'FAIL';
 
 export interface DocumentInfo {
   id: string;
   name: string;
-  status: DocRunStatus | 'FAIL';
+  run: RagflowRunStatus;
+  status: string;
+  progress: number;
   chunk_count: number;
-  run: string;
+  token_count: number;
+  size: number;
   create_date: string;
+  update_date?: string;
+  suffix?: string;
   source_type?: string;
+}
+
+export async function listDocuments(
+  datasetId: string,
+): Promise<DocumentInfo[]> {
+  // GET /datasets/{id}/documents returns JSON metadata; the {doc_id}-suffixed
+  // variant returns the raw file content instead — surprising but that's how
+  // Ragflow v0.25 ships it.
+  const res = await request<{ data: { docs: DocumentInfo[]; total: number } }>(
+    `/api/v1/datasets/${datasetId}/documents?page=1&page_size=100`,
+  );
+  return res.data.docs ?? [];
 }
 
 export async function addDocumentFromUrl(
   datasetId: string,
   url: string,
 ): Promise<DocumentInfo> {
-  const res = await request<{ data: DocumentInfo[] }>(
-    `/api/v1/datasets/${datasetId}/documents`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ name: url, url }),
+  // Ragflow v0.25 does NOT crawl URLs server-side — we must fetch and upload.
+  // This helper only handles the upload step; the route does the fetching.
+  throw new RagflowError(501, 'use fetchUrlToHtml + uploadDocumentFile instead');
+}
+
+/** Fetch a URL and convert HTML → Markdown. Ragflow's naive splitter works
+ * best on flat text (markdown/plain) — feeding raw HTML makes it produce
+ * one huge first chunk that exceeds Ollama's embedding context. */
+export async function fetchUrlToMarkdown(
+  url: string,
+): Promise<{ markdown: string; title: string }> {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; NotebookBot/0.1)',
+      Accept: 'text/html,application/xhtml+xml',
     },
-  );
-  const doc = res.data[0];
-  if (!doc) throw new RagflowError(500, 'no document returned');
-  return doc;
+    redirect: 'follow',
+  });
+  if (!res.ok) {
+    throw new RagflowError(res.status, `fetch ${url} failed: ${res.statusText}`);
+  }
+  const raw = await res.text();
+  const title = extractTitle(raw) ?? new URL(url).hostname;
+  const stripped = stripNonContent(raw);
+  const { htmlToText } = await import('html2text');
+  const md = htmlToText(stripped, {
+    wordwrap: false,
+    preserveImageAlt: false,
+    uppercaseHeadings: false,
+  });
+  const markdown = md.replace(/\n{3,}/g, '\n\n').trim();
+  return { markdown, title };
+}
+
+function stripNonContent(html: string): string {
+  let s = html;
+  for (const tag of ['script', 'style', 'noscript', 'nav', 'footer', 'header', 'aside', 'svg', 'iframe', 'form']) {
+    s = s.replace(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, 'gi'), '');
+  }
+  // Prefer <article>, then <main>, then <body>
+  for (const tag of ['article', 'main', 'body']) {
+    const m = s.match(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, 'i'));
+    if (m) return m[0];
+  }
+  return s;
+}
+
+function extractTitle(html: string): string | null {
+  const m = html.match(/<title[^>]*>([^<]{1,300})<\/title>/i);
+  return m && m[1] ? m[1].trim() : null;
 }
 
 export async function uploadDocumentFile(
@@ -131,6 +195,28 @@ export async function uploadDocumentFile(
   return doc;
 }
 
+/**
+ * Kick the Ragflow parser for one or more documents. In v0.25 the upload
+ * endpoint leaves run=UNSTART until this call is made.
+ */
+export async function parseDocuments(
+  datasetId: string,
+  documentIds: string[],
+): Promise<void> {
+  if (documentIds.length === 0) return;
+  const res = await fetch(`${BASE}/api/v1/datasets/${datasetId}/chunks`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.RAGFLOW_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+  if (!res.ok) {
+    throw new RagflowError(res.status, await res.text());
+  }
+}
+
 export async function getDocument(
   datasetId: string,
   docId: string,
@@ -144,13 +230,19 @@ export async function getDocument(
 // === Retrieval ===
 
 export interface RetrievalChunk {
-  chunk_id: string;
+  chunk_id: string;            // alias for id (kept for backward-compat in citations)
+  id: string;                 // Ragflow chunk id (e.g. "db59456d4cda3414")
   doc_id: string;
   docnm_kwd: string;
-  content_with_weight: string;
-  score: number;
+  content: string;            // actual chunk text — note: NOT content_with_weight
+  content_with_weight?: string; // sometimes present, sometimes not
+  similarity: number;         // combined similarity score
+  vector_similarity?: number; // cosine component
+  term_similarity?: number;   // BM25 component
+  score?: number;             // alias for similarity (some endpoints use this)
   // optional positional hints Ragflow may attach
   positions?: Array<unknown>;
+  document_keyword?: string;
 }
 
 export interface RetrievalResponse {

@@ -3,6 +3,9 @@ import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import { config } from './config.js';
 import { ping as ragflowPing, listDatasets } from './ragflow/client.js';
+import { closeDb } from './db/index.js';
+import { notebookRoutes } from './routes/notebooks.js';
+import { sourceRoutes } from './routes/sources.js';
 
 async function main() {
   const app = Fastify({
@@ -33,6 +36,18 @@ async function main() {
     const datasets = await listDatasets(1, 50);
     return { datasets };
   });
+
+  await app.register(notebookRoutes);
+  await app.register(sourceRoutes);
+
+  const shutdown = async () => {
+    app.log.info('shutting down');
+    await app.close();
+    closeDb();
+    process.exit(0);
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   try {
     await app.listen({ port: config.PORT, host: config.HOST });
