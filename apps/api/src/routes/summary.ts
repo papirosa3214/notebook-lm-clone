@@ -9,7 +9,7 @@ import {
 import { formatContextForPrompt } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
 import { notebooks, sources } from '../db/schema.js';
-import { retrieve } from '../ragflow/client.js';
+import { retrieve, type RetrievalChunk } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
 
 const SUMMARY_SYSTEM_INSTRUCTIONS = [
@@ -32,19 +32,14 @@ function buildUserPrompt(focus: string | undefined): string {
   return base;
 }
 
-function mapChunk(
-  sourceId: string,
-  sourceTitle: string,
-  sourceKind: 'url' | 'file' | 'youtube',
-  c: Awaited<ReturnType<typeof retrieve>>[number],
-): CitationChunk {
+function mapChunk(c: RetrievalChunk): CitationChunk {
   return {
-    id: c.id ?? c.chunk_id ?? '',
-    sourceId,
-    sourceTitle,
-    sourceKind,
-    text: c.content ?? c.content_with_weight ?? '',
-    score: c.similarity ?? c.score ?? 0,
+    id: c.id,
+    sourceId: c.doc_id,
+    sourceTitle: c.docnm_kwd,
+    sourceKind: 'url',
+    text: c.content,
+    score: c.similarity,
   };
 }
 
@@ -57,7 +52,6 @@ export const summaryRoutes: FastifyPluginAsync = async (app) => {
     const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
     if (!nb) return reply.code(404).send({ error: 'notebook not found' });
 
-    // How many sources are ready? If none, short-circuit with a friendly error event.
     const readySources = db
       .select()
       .from(sources)
@@ -65,18 +59,19 @@ export const summaryRoutes: FastifyPluginAsync = async (app) => {
       .all()
       .filter((s) => s.status === 'ready');
 
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (delta: unknown) => {
+      const ok = SummaryDeltaSchema.safeParse(delta);
+      if (!ok.success) return;
+      reply.raw.write(`data: ${JSON.stringify(ok.data)}\n\n`);
+    };
+
     if (readySources.length === 0) {
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-      const send = (delta: unknown) => {
-        const ok = SummaryDeltaSchema.safeParse(delta);
-        if (!ok.success) return;
-        reply.raw.write(`data: ${JSON.stringify(ok.data)}\n\n`);
-      };
       send({
         type: 'error',
         message: 'Нет готовых источников. Добавьте хотя бы один — обзор появится, как только он будет готов.',
@@ -90,46 +85,14 @@ export const summaryRoutes: FastifyPluginAsync = async (app) => {
     const provider = getProvider(providerId);
     const topK = parsed.data.topK ?? 12;
 
-    // 1. Retrieve a broad set of chunks (more than chat — we want coverage, not precision)
     let citations: CitationChunk[] = [];
     try {
-      const raw = await retrieve(nb.ragflowDatasetId, 'обзор тем и ключевых фактов', topK);
-      const sourceMap = new Map(
-        db
-          .select()
-          .from(sources)
-          .where(eq(sources.notebookId, req.params.id))
-          .all()
-          .map((s) => [s.ragflowDocId, s]),
-      );
-      citations = raw.map((c) => {
-        const s = sourceMap.get(c.document_id ?? c.doc_id);
-        return mapChunk(
-          s?.id ?? c.doc_id,
-          c.document_keyword ?? c.docnm_kwd ?? 'source',
-          s?.kind ?? 'url',
-          c,
-        );
-      });
+      const raw = await retrieve(req.params.id, 'обзор тем и ключевых фактов', topK);
+      citations = raw.map(mapChunk);
     } catch (err) {
       req.log.warn({ err }, 'summary retrieval failed');
-      // Continue with empty citations — LLM will get a no-context prompt and produce a sensible message.
     }
 
-    // 2. SSE headers
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    const send = (delta: unknown) => {
-      const ok = SummaryDeltaSchema.safeParse(delta);
-      if (!ok.success) return;
-      reply.raw.write(`data: ${JSON.stringify(ok.data)}\n\n`);
-    };
-
-    // 3. Emit citations first so the UI can show "based on N sources"
     send({ type: 'citations', chunks: citations });
 
     const systemPrompt = `${SUMMARY_SYSTEM_INSTRUCTIONS}\n\nSOURCES:\n${formatContextForPrompt(citations)}`;

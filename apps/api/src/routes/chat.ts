@@ -1,22 +1,21 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
-import { z } from 'zod';
-import { ChatDeltaSchema, ChatRequestSchema, type CitationChunk } from '@notebook/shared';
+import { ChatRequestSchema, ChatDeltaSchema, type CitationChunk } from '@notebook/shared';
 import { CITATION_INSTRUCTIONS, formatContextForPrompt } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
-import { notebooks, sources } from '../db/schema.js';
-import { retrieve } from '../ragflow/client.js';
+import { notebooks } from '../db/schema.js';
+import { retrieve, type RetrievalChunk } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
 
-function mapChunk(sourceId: string, sourceTitle: string, sourceKind: 'url' | 'file' | 'youtube', c: Awaited<ReturnType<typeof retrieve>>[number]): CitationChunk {
+function mapChunk(c: RetrievalChunk): CitationChunk {
   return {
-    id: c.id ?? c.chunk_id ?? '',
-    sourceId,
-    sourceTitle,
-    sourceKind,
-    text: c.content ?? c.content_with_weight ?? '',
-    score: c.similarity ?? c.score ?? 0,
+    id: c.id,
+    sourceId: c.doc_id,
+    sourceTitle: c.docnm_kwd,
+    sourceKind: 'url',
+    text: c.content,
+    score: c.similarity,
   };
 }
 
@@ -29,7 +28,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     return { provider: id, default: provider.defaultModel, models };
   });
 
-  // debug: dry-run retrieval (returns top-k without calling LLM)
+  // dry-run retrieval
   app.get<{ Params: { id: string }; Querystring: { q?: string; topK?: string } }>(
     '/api/notebooks/:id/retrieve',
     async (req, reply) => {
@@ -39,20 +38,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       const db = getDb();
       const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
       if (!nb) return reply.code(404).send({ error: 'notebook not found' });
-      const chunks = await retrieve(nb.ragflowDatasetId, q, topK);
-      const sourceMap = new Map(
-        db.select().from(sources).where(eq(sources.notebookId, req.params.id)).all().map((s) => [s.ragflowDocId, s]),
-      );
-      const citations: CitationChunk[] = chunks.map((c) => {
-        const s = sourceMap.get(c.document_id ?? c.doc_id);
-        return mapChunk(
-          s?.id ?? c.doc_id,
-          c.document_keyword ?? c.docnm_kwd ?? 'source',
-          s?.kind ?? 'url',
-          c,
-        );
-      });
-      return { chunks, citations };
+      const chunks = await retrieve(req.params.id, q, topK);
+      return { chunks, citations: chunks.map(mapChunk) };
     },
   );
 
@@ -74,19 +61,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const topK = parsed.data.topK ?? 5;
     let citations: CitationChunk[] = [];
     try {
-      const raw = await retrieve(nb.ragflowDatasetId, parsed.data.message, topK);
-      const sourceMap = new Map(
-        db.select().from(sources).where(eq(sources.notebookId, req.params.id)).all().map((s) => [s.ragflowDocId, s]),
-      );
-      citations = raw.map((c) => {
-        const s = sourceMap.get(c.document_id ?? c.doc_id);
-        return mapChunk(
-          s?.id ?? c.doc_id,
-          c.document_keyword ?? c.docnm_kwd ?? 'source',
-          s?.kind ?? 'url',
-          c,
-        );
-      });
+      const raw = await retrieve(req.params.id, parsed.data.message, topK);
+      citations = raw.map(mapChunk);
     } catch (err) {
       req.log.warn({ err }, 'retrieve failed; proceeding without context');
     }
@@ -100,15 +76,15 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const send = (delta: unknown) => {
-      const parsed = ChatDeltaSchema.safeParse(delta);
-      if (!parsed.success) return;
-      reply.raw.write(`data: ${JSON.stringify(parsed.data)}\n\n`);
+      const ok = ChatDeltaSchema.safeParse(delta);
+      if (!ok.success) return;
+      reply.raw.write(`data: ${JSON.stringify(ok.data)}\n\n`);
     };
 
     // 3. send citations first
     send({ type: 'citations', chunks: citations });
 
-    // 4. build messages: system (instructions + context) + history + user
+    // 4. build messages
     const systemPrompt = `${CITATION_INSTRUCTIONS}\n\nSOURCES:\n${formatContextForPrompt(citations)}`;
     const messages = [
       { role: 'system' as const, content: systemPrompt },

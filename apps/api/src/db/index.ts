@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { getLoadablePath as sqliteVecPath } from 'sqlite-vec';
 import { config } from '../config.js';
 import * as schema from './schema.js';
 
@@ -17,9 +18,20 @@ export function getDb(): DB {
   _sqlite = new Database(path);
   _sqlite.pragma('journal_mode = WAL');
   _sqlite.pragma('foreign_keys = ON');
+  // Load the sqlite-vec extension for KNN queries on float[N] columns.
+  _sqlite.loadExtension(sqliteVecPath());
   migrate(_sqlite);
   _db = drizzle(_sqlite, { schema });
   return _db;
+}
+
+/**
+ * Raw better-sqlite3 handle — used by modules that need sqlite-vec operations
+ * or fine-grained transaction control that drizzle doesn't expose well.
+ */
+export function getRawSqlite(): Database.Database {
+  if (!_sqlite) getDb();
+  return _sqlite!;
 }
 
 function migrate(sqlite: Database.Database) {
@@ -27,7 +39,6 @@ function migrate(sqlite: Database.Database) {
     CREATE TABLE IF NOT EXISTS notebooks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      ragflow_dataset_id TEXT NOT NULL UNIQUE,
       default_provider TEXT NOT NULL DEFAULT 'anthropic',
       default_model TEXT NOT NULL DEFAULT 'claude-sonnet-4-5',
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -36,7 +47,6 @@ function migrate(sqlite: Database.Database) {
     CREATE TABLE IF NOT EXISTS sources (
       id TEXT PRIMARY KEY,
       notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
-      ragflow_doc_id TEXT,
       kind TEXT NOT NULL CHECK (kind IN ('url', 'file', 'youtube')),
       title TEXT NOT NULL,
       url TEXT,
@@ -57,7 +67,72 @@ function migrate(sqlite: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_artifacts_notebook ON artifacts(notebook_id);
+
+    -- Chunk metadata; one row per inserted vec_chunks rowid.
+    CREATE TABLE IF NOT EXISTS chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vec_rowid INTEGER NOT NULL,
+      notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT,
+      content TEXT NOT NULL,
+      ordinal INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chunks_notebook ON chunks(notebook_id);
+    CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
+    CREATE INDEX IF NOT EXISTS idx_chunks_vec_rowid ON chunks(vec_rowid);
+
+    -- Vector index. Dimension is fixed at module level (1024 for bge-m3-embed).
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+      embedding float[1024]
+    );
   `);
+
+  // One-shot migration from the pre-0.2 Ragflow-era schema.
+  // SQLite can't ALTER DROP a UNIQUE column, so we rebuild the affected tables.
+  // Safe to run repeatedly — guarded by columnExists check.
+  if (columnExists(sqlite, 'notebooks', 'ragflow_dataset_id')) {
+    sqlite.exec(`
+      CREATE TABLE _notebooks_new (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        default_provider TEXT NOT NULL DEFAULT 'anthropic',
+        default_model TEXT NOT NULL DEFAULT 'claude-sonnet-4-5',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      INSERT INTO _notebooks_new (id, title, default_provider, default_model, created_at)
+        SELECT id, title, default_provider, default_model, created_at FROM notebooks;
+      DROP TABLE notebooks;
+      ALTER TABLE _notebooks_new RENAME TO notebooks;
+    `);
+  }
+  if (columnExists(sqlite, 'sources', 'ragflow_doc_id')) {
+    sqlite.exec(`
+      CREATE TABLE _sources_new (
+        id TEXT PRIMARY KEY,
+        notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('url', 'file', 'youtube')),
+        title TEXT NOT NULL,
+        url TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'parsing', 'ready', 'failed')),
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      INSERT INTO _sources_new (id, notebook_id, kind, title, url, status, error, created_at)
+        SELECT id, notebook_id, kind, title, url, status, error, created_at FROM sources;
+      DROP TABLE sources;
+      ALTER TABLE _sources_new RENAME TO sources;
+      CREATE INDEX idx_sources_notebook ON sources(notebook_id);
+    `);
+  }
+}
+
+function columnExists(sqlite: Database.Database, table: string, column: string): boolean {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return cols.some((c) => c.name === column);
 }
 
 export function closeDb() {

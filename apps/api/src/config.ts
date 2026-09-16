@@ -7,14 +7,15 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),
 
-  // Ragflow
-  RAGFLOW_BASE_URL: z.string().url().default('http://192.168.1.110:8080'),
-  RAGFLOW_API_KEY: z.string().min(1, 'RAGFLOW_API_KEY is required'),
-
   // LLM providers (all optional; UI lets user pick)
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OLLAMA_BASE_URL: z.string().url().default('http://192.168.1.110:11434'),
+
+  // Embeddings (Ollama, same host as chat LLM)
+  EMBEDDING_BASE_URL: z.string().url().default('http://192.168.1.110:11434'),
+  EMBEDDING_MODEL: z.string().default('bge-m3-embed'),
+  EMBEDDING_DIM: z.coerce.number().int().min(64).max(4096).default(1024),
 
   // Storage
   DB_PATH: z.string().default('./data/notebook.db'),

@@ -1,23 +1,22 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
 import { eq } from 'drizzle-orm';
+import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
+import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { notebooks, sources } from '../db/schema.js';
-import { fetchUrlToMarkdown, parseDocuments, uploadDocumentFile, type DocumentInfo } from '../ragflow/client.js';
-import { searchWeb, type WebSearchResult } from '../extractors/websearch.js';
+import { fetchUrlToMarkdown } from '../extractors/url.js';
+import { searchWeb } from '../extractors/websearch.js';
+import { addSourceText } from '../vectordb/client.js';
 
 const Body = z.object({
   query: z.string().min(1).max(500),
   maxResults: z.number().int().min(1).max(10).default(5),
 });
 
-function mapStatus(doc: DocumentInfo): 'pending' | 'parsing' | 'ready' | 'failed' {
-  if (doc.run === 'FAIL') return 'failed';
-  if (doc.run === 'DONE') return 'ready';
-  return doc.chunk_count > 0 ? 'ready' : 'parsing';
-}
-
+/**
+ * Legacy one-shot search-and-add: searches DDG and ingests every hit.
+ * Kept for backward compatibility — UI uses /search-preview + /search-add-batch instead.
+ */
 export const searchRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/search-and-add',
@@ -29,8 +28,7 @@ export const searchRoutes: FastifyPluginAsync = async (app) => {
       const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
       if (!nb) return reply.code(404).send({ error: 'notebook not found' });
 
-      // 1. Search
-      let results: WebSearchResult[];
+      let results: Array<{ title: string; url: string; snippet: string }>;
       try {
         results = await searchWeb(parsed.data.query, parsed.data.maxResults);
       } catch (err) {
@@ -43,7 +41,6 @@ export const searchRoutes: FastifyPluginAsync = async (app) => {
         return { query: parsed.data.query, searchResults: [], added: [] };
       }
 
-      // 2. Insert pending sources up front so the UI sees them immediately
       const localIds: string[] = [];
       for (const r of results) {
         const id = nanoid(12);
@@ -60,30 +57,25 @@ export const searchRoutes: FastifyPluginAsync = async (app) => {
           .run();
       }
 
-      // 3. Fetch + upload + kick for each, asynchronously-ish (in sequence to avoid hammering Ragflow)
       const added: Array<{ id: string; title: string; url: string; status: string; error?: string }> = [];
       for (let i = 0; i < results.length; i++) {
         const r = results[i]!;
         const localId = localIds[i]!;
         try {
           const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(r.url);
-          const safeName = (r.title || fetchedTitle)
-            .replace(/[^a-zA-Z0-9._-]+/g, '_')
-            .slice(0, 80) || `web-${Date.now()}`;
-          const doc = await uploadDocumentFile(nb.ragflowDatasetId, {
-            buffer: Buffer.from(markdown, 'utf-8'),
-            filename: `${safeName}.md`,
+          await addSourceText({
+            notebookId: req.params.id,
+            sourceId: localId,
+            kind: 'url',
+            title: r.title || fetchedTitle,
+            url: r.url,
+            content: markdown,
           });
-          try {
-            await parseDocuments(nb.ragflowDatasetId, [doc.id]);
-          } catch (kickErr) {
-            req.log.warn({ err: kickErr, docId: doc.id }, 'parse kick failed; refresh will retry');
-          }
           db.update(sources)
-            .set({ ragflowDocId: doc.id, title: r.title || fetchedTitle, status: mapStatus(doc) })
+            .set({ title: r.title || fetchedTitle, status: 'ready' })
             .where(eq(sources.id, localId))
             .run();
-          added.push({ id: localId, title: r.title, url: r.url, status: mapStatus(doc) });
+          added.push({ id: localId, title: r.title, url: r.url, status: 'ready' });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           db.update(sources)

@@ -1,41 +1,21 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { notebooks, sources } from '../db/schema.js';
-import {
-  fetchUrlToMarkdown,
-  listDocuments,
-  parseDocuments,
-  uploadDocumentFile,
-  type DocumentInfo,
-} from '../ragflow/client.js';
 import { extractDocx, extractPdf, extractPlainText } from '../extractors/index.js';
+import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
+import { addSourceText, removeSource } from '../vectordb/client.js';
 
 const AddUrlBody = z.object({
   url: z.string().url(),
   title: z.string().optional(),
 });
 
-function mapRagflowStatus(doc: DocumentInfo): 'pending' | 'parsing' | 'ready' | 'failed' {
-  if (doc.run === 'FAIL') return 'failed';
-  if (doc.run === 'DONE') return 'ready';
-  if (doc.run === 'UNSTART' || doc.run === 'RUNNING') return doc.chunk_count > 0 ? 'ready' : 'parsing';
-  return 'parsing';
-}
-
-async function findDoc(
-  datasetId: string,
-  docId: string,
-): Promise<DocumentInfo | null> {
-  const all = await listDocuments(datasetId);
-  return all.find((d) => d.id === docId) ?? null;
-}
-
 export const sourceRoutes: FastifyPluginAsync = async (app) => {
-  // list sources for a notebook
+  // List sources for a notebook.
   app.get<{ Params: { id: string } }>('/api/notebooks/:id/sources', async (req, reply) => {
     const db = getDb();
     const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
@@ -48,7 +28,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     return { sources: list };
   });
 
-  // add a URL source (Ragflow will fetch, parse, embed)
+  // Add a URL — fetch → markdown → chunk → embed → store. Synchronous: by the
+  // time the POST returns, the source is either 'ready' or 'failed'.
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/url',
     async (req, reply) => {
@@ -77,35 +58,23 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         .run();
 
       try {
-        // 1. fetch + convert HTML → Markdown ourselves
         const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
-        // 2. upload the markdown into the Ragflow dataset (extension .md picks markdown parser)
-        const safeName =
-          (title ?? fetchedTitle)
-            .replace(/[^a-zA-Z0-9._-]+/g, '_')
-            .slice(0, 80) || `web-${Date.now()}`;
-        const doc = await uploadDocumentFile(nb.ragflowDatasetId, {
-          buffer: Buffer.from(markdown, 'utf-8'),
-          filename: `${safeName}.md`,
+        await addSourceText({
+          notebookId: req.params.id,
+          sourceId: localId,
+          kind: 'url',
+          title: title ?? fetchedTitle,
+          url,
+          content: markdown,
         });
-        // 3. kick the parser (Ragflow v0.25 leaves run=UNSTART without this)
-        try {
-          await parseDocuments(nb.ragflowDatasetId, [doc.id]);
-        } catch (kickErr) {
-          req.log.warn({ err: kickErr, docId: doc.id }, 'parseDocuments kick failed; will retry on refresh');
-        }
-        // 4. update our mirror with the ragflow doc id + initial status
         db.update(sources)
-          .set({
-            ragflowDocId: doc.id,
-            title: title ?? fetchedTitle,
-            status: mapRagflowStatus(doc),
-          })
+          .set({ title: title ?? fetchedTitle, status: 'ready' })
           .where(eq(sources.id, localId))
           .run();
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         db.update(sources)
-          .set({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+          .set({ status: 'failed', error: msg })
           .where(eq(sources.id, localId))
           .run();
       }
@@ -115,29 +84,19 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  // poll Ragflow to refresh status of a single source
+  // Per-source refresh — kept as a no-op for UI compatibility (the local
+  // store transitions pending → ready synchronously, so polling is unnecessary).
   app.post<{ Params: { id: string } }>(
     '/api/sources/:id/refresh',
     async (req, reply) => {
       const db = getDb();
       const src = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
       if (!src) return reply.code(404).send({ error: 'source not found' });
-      if (!src.ragflowDocId) return reply.code(409).send({ error: 'source has no ragflow doc yet' });
-      const nb = db.select().from(notebooks).where(eq(notebooks.id, src.notebookId)).get();
-      if (!nb) return reply.code(404).send({ error: 'notebook not found' });
-
-      const doc = await findDoc(nb.ragflowDatasetId, src.ragflowDocId);
-      if (!doc) return reply.code(404).send({ error: 'ragflow doc not found in dataset' });
-      db.update(sources)
-        .set({ status: mapRagflowStatus(doc) })
-        .where(eq(sources.id, req.params.id))
-        .run();
-      const updated = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
-      return updated;
+      return src;
     },
   );
 
-  // bulk refresh all sources of a notebook (cheap polling)
+  // Bulk refresh — same no-op contract.
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/refresh',
     async (req, reply) => {
@@ -147,51 +106,23 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
       const list = db
         .select()
         .from(sources)
-        .where(and(eq(sources.notebookId, req.params.id)))
-        .all();
-      const updates: Array<typeof sources.$inferSelect> = [];
-      for (const s of list) {
-        if (!s.ragflowDocId) continue;
-        if (s.status === 'ready' || s.status === 'failed') continue;
-        try {
-          const doc = await findDoc(nb.ragflowDatasetId, s.ragflowDocId);
-          if (!doc) continue;
-          const next = mapRagflowStatus(doc);
-          if (next !== s.status) {
-            db.update(sources)
-              .set({ status: next })
-              .where(eq(sources.id, s.id))
-              .run();
-            updates.push({ ...s, status: next });
-          }
-        } catch (err) {
-          db.update(sources)
-            .set({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
-            .where(eq(sources.id, s.id))
-            .run();
-        }
-      }
-      const fresh = db
-        .select()
-        .from(sources)
         .where(eq(sources.notebookId, req.params.id))
         .all();
-      return { sources: fresh, changed: updates.length };
+      return { sources: list, changed: 0 };
     },
   );
 
-  // delete a source (local + Ragflow)
+  // Delete a source (metadata + chunks via FK cascade).
   app.delete<{ Params: { id: string } }>('/api/sources/:id', async (req, reply) => {
     const db = getDb();
     const src = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
     if (!src) return reply.code(404).send({ error: 'source not found' });
-    // NB: Ragflow document deletion is not called here in MVP — would need
-    // DELETE /api/v1/datasets/{dataset_id}/documents/{doc_id}
+    removeSource(req.params.id);
     db.delete(sources).where(eq(sources.id, req.params.id)).run();
     return reply.code(204).send();
   });
 
-  // upload a file (PDF/DOCX/TXT/MD) and ingest into Ragflow as markdown
+  // File upload (PDF/DOCX/TXT/MD).
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/upload',
     async (req, reply) => {
@@ -228,23 +159,22 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         else if (lower.endsWith('.txt') || lower.endsWith('.text')) text = await extractPlainText(buffer);
         else return reply.code(415).send({ error: `unsupported file type: ${filename}` });
 
-        const base = filename.replace(/\.[^.]+$/, '').slice(0, 60);
-        const doc = await uploadDocumentFile(nb.ragflowDatasetId, {
-          buffer: Buffer.from(text, 'utf-8'),
-          filename: `${base}.md`,
+        await addSourceText({
+          notebookId: req.params.id,
+          sourceId: localId,
+          kind: 'file',
+          title: filename,
+          url: null,
+          content: text,
         });
-        try {
-          await parseDocuments(nb.ragflowDatasetId, [doc.id]);
-        } catch (kickErr) {
-          req.log.warn({ err: kickErr, docId: doc.id }, 'parseDocuments kick failed');
-        }
         db.update(sources)
-          .set({ ragflowDocId: doc.id, status: mapRagflowStatus(doc) })
+          .set({ status: 'ready' })
           .where(eq(sources.id, localId))
           .run();
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         db.update(sources)
-          .set({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+          .set({ status: 'failed', error: msg })
           .where(eq(sources.id, localId))
           .run();
       }
@@ -254,7 +184,7 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  // ingest a YouTube video transcript
+  // YouTube transcript.
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/youtube',
     async (req, reply) => {
@@ -278,23 +208,22 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
 
       try {
         const { text, title: fetchedTitle } = await fetchYouTubeTranscript(parsed.data.url);
-        const base = (parsed.data.title ?? fetchedTitle).replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 60) || `yt-${Date.now()}`;
-        const doc = await uploadDocumentFile(nb.ragflowDatasetId, {
-          buffer: Buffer.from(text, 'utf-8'),
-          filename: `${base}.md`,
+        await addSourceText({
+          notebookId: req.params.id,
+          sourceId: localId,
+          kind: 'youtube',
+          title: parsed.data.title ?? fetchedTitle,
+          url: parsed.data.url,
+          content: text,
         });
-        try {
-          await parseDocuments(nb.ragflowDatasetId, [doc.id]);
-        } catch (kickErr) {
-          req.log.warn({ err: kickErr, docId: doc.id }, 'parseDocuments kick failed');
-        }
         db.update(sources)
-          .set({ ragflowDocId: doc.id, title: parsed.data.title ?? fetchedTitle, status: mapRagflowStatus(doc) })
+          .set({ title: parsed.data.title ?? fetchedTitle, status: 'ready' })
           .where(eq(sources.id, localId))
           .run();
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         db.update(sources)
-          .set({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+          .set({ status: 'failed', error: msg })
           .where(eq(sources.id, localId))
           .run();
       }
@@ -306,7 +235,6 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
 };
 
 function sanitizeFilename(name: string): string {
-  // strip path components and anything outside safe chars
   const base = name.split(/[\\/]/).pop() ?? 'upload';
   return base.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'upload';
 }

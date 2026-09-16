@@ -1,15 +1,15 @@
 # NotebookLM Clone
 
 Веб-приложение в духе Google NotebookLM: источники + чат с LLM + markdown-артефакты.
-Использует Ragflow как vector store, Markdown pipeline для любых источников.
+Локальный vector store на базе SQLite + sqlite-vec, embeddings через Ollama.
 
 ## Стек
 
 - **Frontend:** Vite 5 + React 19 + TypeScript, Tailwind CSS 3, TanStack Query, React Router
 - **Backend:** Fastify 5 + TypeScript, Drizzle ORM + SQLite (better-sqlite3)
-- **Vector store / Retrieval:** Ragflow v0.25.5 на `.110:8080` (infiniflow/ragflow)
-- **Embeddings:** `bge-m3-embed@Ollama` на `.110:11434`
-- **LLM providers:** Ollama (qwen3.6-27b-iq4-16k по умолчанию, `think: false`), Anthropic, OpenAI
+- **Vector store / Retrieval:** локальный, через `sqlite-vec` (виртуальная таблица + KNN по `embedding float[1024]`)
+- **Embeddings:** `bge-m3-embed@Ollama` на `.110:11434` (1024-dim, один запрос на чанк; вставляем батчами по 8 параллельно)
+- **LLM providers:** Ollama (qwen3.6-27b-iq4-16k по умолчанию), Anthropic, OpenAI
 - **Парсинг:** html2text (URL → markdown), pdf-parse (PDF), mammoth (DOCX), youtube-transcript (субтитры)
 - **Workspace:** pnpm monorepo (`apps/*` + `packages/*`)
 
@@ -45,8 +45,8 @@ pnpm install
 
 ```bash
 cp apps/api/.env.example apps/api/.env
-# Минимум — заполнить RAGFLOW_API_KEY (создать в UI Ragflow http://192.168.1.110:8080)
 # Для чата: хотя бы один из ANTHROPIC_API_KEY / OPENAI_API_KEY, либо Ollama (по умолчанию)
+# Embeddings идут через Ollama (EMBEDDING_BASE_URL) — должен быть запущен bge-m3-embed.
 ```
 
 ### 3. Запустить dev
@@ -66,23 +66,22 @@ pnpm --filter @notebook/web dev      # Web на :5173
 
 ## Как это работает
 
-### Pipeline источника
+### Pipeline источника (синхронный, в момент POST)
 
 ```
-URL         → fetch → html2text     → .md → Ragflow (chunk_token_num=256) → bge-m3 embedding
-PDF/DOCX    → extractXxx            → .md → Ragflow → embedding
-TXT/MD      → normalize              → .md → Ragflow → embedding
-YouTube URL → youtube-transcript     → [m:ss] text → .md → Ragflow → embedding
+URL         → fetch → html2text   → .md → recursive splitter (~2 KB chunks) → Ollama bge-m3 embed (8 параллельно) → vec_chunks + chunks
+PDF/DOCX    → extractXxx          → .md → то же
+TXT/MD      → как есть             → .md → то же
+YouTube URL → youtube-transcript  → [m:ss] text → то же
 ```
 
-Ключевое: Ragflow-парсер NaiveSplitter работает лучше на плоском тексте, чем на HTML.
-Поэтому все источники приводятся к markdown перед загрузкой. Это также решает проблему
-`input length exceeds context length` в Ollama bge-m3.
+К моменту завершения POST источник уже `ready` (или `failed` с error) — никакого
+отдельного статуса `parsing` и фонового polling в UI не нужно.
 
 ### Retrieval + Chat
 
-1. Вопрос → `POST /api/v1/retrieval` (Ragflow) → top-k чанков с similarity score
-2. Chunks маппятся в `CitationChunk[]` с нашими sourceId/title
+1. Вопрос → `embed()` → KNN `WHERE vec_chunks MATCH ? AND k = ? AND notebook_id = ?`
+2. JOIN с метаданными чанков → `CitationChunk[]` с нашими sourceId/title
 3. System prompt: `CITATION_INSTRUCTIONS` + пронумерованные источники
 4. LLM provider стримит ответ через SSE: `citations` → `token`×N → `done`
 5. LLM обязана возвращать `[N]`-маркеры в тексте — клиент рендерит как чипы
@@ -124,18 +123,17 @@ data: {"type":"done","messageId":"abc123"}\n\n
 
 ## Деплой
 
-Планируется на `.110` через Coolify рядом с Ragflow и TaskFlow. На MVP — локально.
+Планируется на `.110` через Coolify рядом с TaskFlow. На MVP — локально.
 
 ## Известные ограничения
 
 - **PDF-парсинг:** `pdf-parse` имеет известные баги (импортирует дефолтные тестовые файлы);
   если упадёт — переключиться на `pdfjs-dist`
 - **YouTube:** использует HTML-скрейпинг; при блокировке — fallback на `yt-dlp`
-- **Удаление Ragflow dataset:** не поддерживается через REST API в v0.25 (405 Method Not Allowed);
-  датасеты-зомби надо чистить вручную в UI
-- **Ragflow splitter:** требует markdown на входе; HTML даёт "No chunk built"
-- **Embedding:** `bge-m3-embed@Ollama` иногда падает на длинных чанках;
-  `chunk_token_num=256` смягчает проблему
+- **Embedding latency:** Ollama `bge-m3-embed` ~1–2 сек на чанк; для страницы на 30 чанков
+  добавление занимает ~10–20 сек (батчами по 8 параллельно).
+- **Score:** sqlite-vec отдаёт distance в произвольном диапазоне (не нормализован к [0..1]).
+  Используется только для сортировки — клиенту не показывается.
 - **Авторизация:** нет (один пользователь); добавить при необходимости
 
 ## История этапов
@@ -146,3 +144,5 @@ data: {"type":"done","messageId":"abc123"}\n\n
 - [x] Этап 3: file uploads + YouTube transcript ingestion (`e398547`)
 - [x] Этап 4: artifacts CRUD — markdown notes with download (`0fb6e34`)
 - [x] Этап 5 (UI): React UI с трёхколоночным layout, SSE-клиент, Tailwind (`2d3d508`)
+- [x] Этап 6 (NotebookLM-фичи): summary panel, discover preview, mobile tabs (`2a2ec9c`)
+- [x] Этап 7: локальный vector store на sqlite-vec (выпилили Ragflow)

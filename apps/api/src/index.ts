@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import multipart from '@fastify/multipart';
 import { config } from './config.js';
-import { ping as ragflowPing, listDatasets } from './ragflow/client.js';
+import { ping as embeddingsPing } from './vectordb/client.js';
 import { closeDb } from './db/index.js';
 import { notebookRoutes } from './routes/notebooks.js';
 import { sourceRoutes } from './routes/sources.js';
@@ -31,19 +31,13 @@ async function main() {
   });
 
   app.get('/api/health', async () => {
-    const ragflowOk = await ragflowPing();
+    const embeddingsOk = await embeddingsPing();
     return {
-      ok: ragflowOk,
+      ok: embeddingsOk,
       service: 'notebook-api',
-      ragflow: ragflowOk ? 'connected' : 'unreachable',
-      version: '0.1.0',
+      embeddings: embeddingsOk ? 'connected' : 'unreachable',
+      version: '0.2.0',
     };
-  });
-
-  // Debug: list existing Ragflow datasets (handy during MVP)
-  app.get('/api/ragflow/datasets', async () => {
-    const datasets = await listDatasets(1, 50);
-    return { datasets };
   });
 
   await app.register(notebookRoutes);
