@@ -5,19 +5,21 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
+// scripts/ is one level below the repo root
 const here = dirname(fileURLToPath(import.meta.url));
-const apiRoot = resolve(here, 'apps/api');
+const apiRoot = resolve(here, '..', 'apps', 'api');
 
 await build({
-  entryPoints: [resolve(apiRoot, 'dist/index.js')],
+  entryPoints: [resolve(apiRoot, 'dist', 'index.js')],
   bundle: true,
   platform: 'node',
   target: 'node18',
   format: 'esm',
-  outfile: resolve(apiRoot, 'dist/bundle.mjs'),
+  outfile: resolve(apiRoot, 'dist', 'bundle.mjs'),
   // Native modules like better-sqlite3 must not be bundled.
   external: ['better-sqlite3', './*.node'],
   // Keep dynamic require for optional native binaries (pdf-parse, mammoth etc).
   banner: { js: "import { createRequire as _cr } from 'module'; const require = _cr(import.meta.url);" },
   logLevel: 'info',
 });
+
