@@ -16,8 +16,9 @@ await build({
   target: 'node18',
   format: 'esm',
   outfile: resolve(apiRoot, 'dist', 'bundle.mjs'),
-  // better-sqlite3 is a native addon — must be required at runtime, not inlined.
-  external: ['better-sqlite3'],
+  // Native addon and CJS-only worker packages load from node_modules at runtime
+  // (bundling them into ESM breaks their __dirname / worker-thread resolution).
+  external: ['better-sqlite3', 'pino-pretty'],
   banner: { js: "import { createRequire as _cr } from 'module'; const require = _cr(import.meta.url);" },
   logLevel: 'info',
 });

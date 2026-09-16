@@ -13,8 +13,7 @@
     "declaration": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "lib": ["ES2022"],
-    "types": ["node"]
+    "lib": ["ES2022"]
   },
   "include": ["src/**/*.ts"]
 }
