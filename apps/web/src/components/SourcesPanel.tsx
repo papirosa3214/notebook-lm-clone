@@ -31,6 +31,7 @@ export function SourcesPanel({ notebookId }: Props) {
   const [showAddUrl, setShowAddUrl] = useState(false);
   const [showAddYt, setShowAddYt] = useState(false);
   const [showAddFile, setShowAddFile] = useState(false);
+  const [showAddSearch, setShowAddSearch] = useState(false);
 
   return (
     <div className="flex h-full flex-col">
@@ -46,6 +47,7 @@ export function SourcesPanel({ notebookId }: Props) {
         <button className="btn btn-secondary text-xs" onClick={() => setShowAddUrl(true)}>+ URL</button>
         <button className="btn btn-secondary text-xs" onClick={() => setShowAddYt(true)}>+ YouTube</button>
         <button className="btn btn-secondary text-xs" onClick={() => setShowAddFile(true)}>+ Файл</button>
+        <button className="btn btn-secondary text-xs" onClick={() => setShowAddSearch(true)}>🔍 Поиск</button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -63,6 +65,7 @@ export function SourcesPanel({ notebookId }: Props) {
       {showAddUrl && <AddUrlDialog notebookId={notebookId} onClose={() => setShowAddUrl(false)} />}
       {showAddYt && <AddYoutubeDialog notebookId={notebookId} onClose={() => setShowAddYt(false)} />}
       {showAddFile && <AddFileDialog notebookId={notebookId} onClose={() => setShowAddFile(false)} />}
+      {showAddSearch && <SearchDialog notebookId={notebookId} onClose={() => setShowAddSearch(false)} />}
     </div>
   );
 }
@@ -89,6 +92,65 @@ function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => v
         <button onClick={onDelete} className="btn btn-ghost text-xs text-red-500" title="Удалить">×</button>
       </div>
     </li>
+  );
+}
+
+function SearchDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [query, setQuery] = useState('');
+  const [maxResults, setMaxResults] = useState(5);
+  const search = useMutation({
+    mutationFn: () => api.searchAndAdd(notebookId, query, maxResults),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources', notebookId] });
+      onClose();
+    },
+  });
+  return (
+    <Dialog title="Найти в интернете" onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (query.trim()) search.mutate();
+        }}
+        className="space-y-3"
+      >
+        <div>
+          <label className="text-xs text-zinc-500">Запрос (DuckDuckGo, без ключей)</label>
+          <input
+            className="input mt-1"
+            placeholder="что такое retrieval-augmented generation"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            required
+          />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500">Сколько результатов добавить (1–10)</label>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            className="input mt-1"
+            value={maxResults}
+            onChange={(e) => setMaxResults(Math.max(1, Math.min(10, Number(e.target.value) || 5)))}
+          />
+        </div>
+        {search.isError && (
+          <p className="text-xs text-red-600">{(search.error as Error).message ?? String(search.error)}</p>
+        )}
+        <p className="text-xs text-zinc-500">
+          Поиск может занять ~{maxResults * 5} сек — для каждого результата качаем и парсим страницу.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Отмена</button>
+          <button type="submit" className="btn btn-primary" disabled={!query.trim() || search.isPending}>
+            {search.isPending ? 'Ищу и загружаю…' : 'Найти и добавить'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

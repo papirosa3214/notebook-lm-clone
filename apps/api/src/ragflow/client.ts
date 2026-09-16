@@ -147,7 +147,11 @@ export async function fetchUrlToMarkdown(
   const raw = await res.text();
   const title = extractTitle(raw) ?? new URL(url).hostname;
   const stripped = stripNonContent(raw);
-  const { htmlToText } = (await import('html2text')) as unknown as {
+  // html2text is CommonJS-only — use createRequire so it works under ESM/tsx.
+  // (Dynamic `await import()` returns { default: {...} } which we can't safely destructure.)
+  const { createRequire } = await import('node:module');
+  const requireFromHere = createRequire(import.meta.url);
+  const { htmlToText } = requireFromHere('html2text') as {
     htmlToText: (html: string, opts?: Record<string, unknown>) => string;
   };
   const md = htmlToText(stripped, {

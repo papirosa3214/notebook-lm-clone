@@ -55,6 +55,15 @@ export const api = {
     }
     return res.json();
   },
+  searchAndAdd: (notebookId: string, query: string, maxResults = 5) =>
+    http<{
+      query: string;
+      searchResults: Array<{ title: string; url: string; snippet: string }>;
+      added: Array<{ id: string; title: string; url: string; status: string; error?: string }>;
+    }>(`/api/notebooks/${notebookId}/search-and-add`, {
+      method: 'POST',
+      body: JSON.stringify({ query, maxResults }),
+    }),
   refreshSources: (notebookId: string) =>
     http<{ sources: Source[]; changed: number }>(
       `/api/notebooks/${notebookId}/sources/refresh`,
