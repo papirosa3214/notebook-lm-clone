@@ -1,0 +1,17 @@
+# Reduce build context — don't ship node_modules, dist, .git, .env, etc.
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+**/.next
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+**/.DS_Store
+**/coverage
+**/.vite
+README.md
+.hermes
+.husky

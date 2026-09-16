@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: notebook-api:latest
+    container_name: notebook-api
+    restart: unless-stopped
+    env_file:
+      - ./apps/api/.env
+    environment:
+      NODE_ENV: production
+      PORT: 4001
+      HOST: 0.0.0.0
+    volumes:
+      - notebook-data:/app/data
+    expose:
+      - "4001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: notebook-web:latest
+    container_name: notebook-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # public-facing port on the host (nginx) — change if 8080 conflicts with Ragflow
+      - "8085:80"
+
+volumes:
+  notebook-data:
+    name: notebook-data
