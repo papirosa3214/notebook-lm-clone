@@ -18,6 +18,8 @@ await build({
   outfile: resolve(apiRoot, 'dist', 'bundle.mjs'),
   // Native modules like better-sqlite3 must not be bundled.
   external: ['better-sqlite3', './*.node'],
+  // Bundle workspace packages (they ship as .ts and Node can't resolve those)
+  noExternal: ['@notebook/shared'],
   // Keep dynamic require for optional native binaries (pdf-parse, mammoth etc).
   banner: { js: "import { createRequire as _cr } from 'module'; const require = _cr(import.meta.url);" },
   logLevel: 'info',
