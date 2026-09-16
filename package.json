@@ -1,0 +1,16 @@
+{
+  "name": "notebook-lm-clone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web app like Google NotebookLM — sources + chat + artifacts",
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
