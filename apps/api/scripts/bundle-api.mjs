@@ -8,6 +8,7 @@ import { dirname, resolve } from 'node:path';
 // scripts/ lives inside apps/api/, so apiRoot = here (parent is apps/api/dist from here? no — here is apps/api/scripts)
 const here = dirname(fileURLToPath(import.meta.url));
 const apiRoot = resolve(here, '..');
+const sharedRoot = resolve(apiRoot, '..', '..', 'packages', 'shared');
 
 await build({
   entryPoints: [resolve(apiRoot, 'dist', 'index.js')],
@@ -16,11 +17,13 @@ await build({
   target: 'node18',
   format: 'esm',
   outfile: resolve(apiRoot, 'dist', 'bundle.mjs'),
-  // Native modules like better-sqlite3 must not be bundled.
-  external: ['better-sqlite3', './*.node'],
-  // Bundle everything else (incl. @notebook/shared which ships as .ts)
-  packages: undefined,
-  // Keep dynamic require for optional native binaries (pdf-parse, mammoth etc).
+  external: ['better-sqlite3'],
+  // Resolve workspace @notebook/shared to its actual src/ folder so esbuild
+  // picks up the .ts files instead of going through the workspace symlink.
+  alias: {
+    '@notebook/shared': resolve(sharedRoot, 'src', 'index.ts'),
+    '@notebook/shared/providers': resolve(sharedRoot, 'src', 'providers.ts'),
+  },
   banner: { js: "import { createRequire as _cr } from 'module'; const require = _cr(import.meta.url);" },
   logLevel: 'info',
 });
