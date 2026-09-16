@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
+import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { ping as ragflowPing, listDatasets } from './ragflow/client.js';
 import { closeDb } from './db/index.js';
@@ -21,6 +22,9 @@ async function main() {
 
   await app.register(cors, { origin: true, credentials: true });
   await app.register(sensible);
+  await app.register(multipart, {
+    limits: { fileSize: 50 * 1024 * 1024 },
+  });
 
   app.get('/api/health', async () => {
     const ragflowOk = await ragflowPing();
