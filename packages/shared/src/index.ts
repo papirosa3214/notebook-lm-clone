@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// === Primitives ===
+// === Primitives (defined here, used internally; re-exported for downstream packages) ===
 
 export const SourceKindSchema = z.enum(['url', 'file', 'youtube']);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
@@ -8,16 +8,22 @@ export type SourceKind = z.infer<typeof SourceKindSchema>;
 export const ProviderIdSchema = z.enum(['anthropic', 'openai', 'ollama']);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
-// === Ragflow-shaped chunks (used as citations) ===
+export const ChatRoleSchema = z.enum(['system', 'user', 'assistant']);
+export type ChatRole = z.infer<typeof ChatRoleSchema>;
+
+export const ChatMessageSchema = z.object({
+  role: ChatRoleSchema,
+  content: z.string(),
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export const CitationChunkSchema = z.object({
-  id: z.string(),              // Ragflow chunk_id
-  sourceId: z.string(),        // our Source.id
+  id: z.string(),
+  sourceId: z.string(),
   sourceTitle: z.string(),
   sourceKind: SourceKindSchema,
   text: z.string(),
   score: z.number(),
-  // optional location hints (page for PDF, timestamp for YT)
   location: z.string().optional(),
 });
 export type CitationChunk = z.infer<typeof CitationChunkSchema>;
@@ -60,20 +66,10 @@ export const ArtifactSchema = z.object({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
-// === Chat ===
-
-export const ChatRoleSchema = z.enum(['system', 'user', 'assistant']);
-export type ChatRole = z.infer<typeof ChatRoleSchema>;
-
-export const ChatMessageSchema = z.object({
-  role: ChatRoleSchema,
-  content: z.string(),
-});
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+// === Chat (ChatMessage already defined above for internal use) ===
 
 export const ChatRequestSchema = z.object({
-  notebookId: z.string(),
-  message: z.string(),
+  message: z.string().min(1),
   history: z.array(ChatMessageSchema).max(40).optional(),
   provider: ProviderIdSchema.optional(),
   model: z.string().optional(),
@@ -83,9 +79,9 @@ export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
 // SSE delta types streamed from API
 export const ChatDeltaSchema = z.discriminatedUnion('type', [
-  z.object({ type: 'citations', chunks: z.array(CitationChunkSchema) }),
-  z.object({ type: 'token', text: z.string() }),
-  z.object({ type: 'done', messageId: z.string() }),
-  z.object({ type: 'error', message: z.string() }),
+  z.object({ type: z.literal('citations'), chunks: z.array(CitationChunkSchema) }),
+  z.object({ type: z.literal('token'), text: z.string() }),
+  z.object({ type: z.literal('done'), messageId: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type ChatDelta = z.infer<typeof ChatDeltaSchema>;

@@ -6,6 +6,7 @@ import { ping as ragflowPing, listDatasets } from './ragflow/client.js';
 import { closeDb } from './db/index.js';
 import { notebookRoutes } from './routes/notebooks.js';
 import { sourceRoutes } from './routes/sources.js';
+import { chatRoutes } from './routes/chat.js';
 
 async function main() {
   const app = Fastify({
@@ -39,6 +40,7 @@ async function main() {
 
   await app.register(notebookRoutes);
   await app.register(sourceRoutes);
+  await app.register(chatRoutes);
 
   const shutdown = async () => {
     app.log.info('shutting down');

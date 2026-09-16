@@ -147,7 +147,9 @@ export async function fetchUrlToMarkdown(
   const raw = await res.text();
   const title = extractTitle(raw) ?? new URL(url).hostname;
   const stripped = stripNonContent(raw);
-  const { htmlToText } = await import('html2text');
+  const { htmlToText } = (await import('html2text')) as unknown as {
+    htmlToText: (html: string, opts?: Record<string, unknown>) => string;
+  };
   const md = htmlToText(stripped, {
     wordwrap: false,
     preserveImageAlt: false,
@@ -230,19 +232,19 @@ export async function getDocument(
 // === Retrieval ===
 
 export interface RetrievalChunk {
-  chunk_id: string;            // alias for id (kept for backward-compat in citations)
-  id: string;                 // Ragflow chunk id (e.g. "db59456d4cda3414")
+  chunk_id?: string;             // legacy alias from older Ragflow versions
+  id?: string;                   // Ragflow chunk id
   doc_id: string;
+  document_id?: string;          // newer Ragflow uses document_id
   docnm_kwd: string;
-  content: string;            // actual chunk text — note: NOT content_with_weight
-  content_with_weight?: string; // sometimes present, sometimes not
-  similarity: number;         // combined similarity score
-  vector_similarity?: number; // cosine component
-  term_similarity?: number;   // BM25 component
-  score?: number;             // alias for similarity (some endpoints use this)
-  // optional positional hints Ragflow may attach
+  document_keyword?: string;     // newer field name
+  content: string;
+  content_with_weight?: string;
+  similarity: number;
+  vector_similarity?: number;
+  term_similarity?: number;
+  score?: number;
   positions?: Array<unknown>;
-  document_keyword?: string;
 }
 
 export interface RetrievalResponse {

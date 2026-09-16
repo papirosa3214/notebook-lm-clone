@@ -1,4 +1,15 @@
-import type { ChatMessage, CitationChunk, ProviderId } from './index.js';
+import type {
+  ProviderId as ProviderIdT,
+  ChatMessage as ChatMessageT,
+  CitationChunk as CitationChunkT,
+  ChatRole as ChatRoleT,
+} from './index.js';
+
+// Re-export types so downstream code can keep importing them from '@notebook/shared/providers'.
+export type ProviderId = ProviderIdT;
+export type ChatMessage = ChatMessageT;
+export type CitationChunk = CitationChunkT;
+export type ChatRole = ChatRoleT;
 
 /**
  * Streaming chat delta from an LLM provider.
