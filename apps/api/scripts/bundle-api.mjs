@@ -5,9 +5,9 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-// scripts/ is one level below the repo root
+// scripts/ lives inside apps/api/, so apiRoot = here (parent is apps/api/dist from here? no — here is apps/api/scripts)
 const here = dirname(fileURLToPath(import.meta.url));
-const apiRoot = resolve(here, '..', 'apps', 'api');
+const apiRoot = resolve(here, '..');
 
 await build({
   entryPoints: [resolve(apiRoot, 'dist', 'index.js')],
