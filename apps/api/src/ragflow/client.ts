@@ -219,6 +219,12 @@ export async function parseDocuments(
   }
 }
 
+/**
+ * NOTE: `GET /datasets/{id}/documents/{doc_id}` returns the raw file content
+ * in Ragflow v0.25, not JSON metadata. We use `listDocuments(datasetId)` and
+ * filter client-side instead. Kept here only as a comment to prevent
+ * future confusion — there's no working getDocument.
+
 export async function getDocument(
   datasetId: string,
   docId: string,
@@ -228,6 +234,7 @@ export async function getDocument(
   );
   return res.data;
 }
+*/
 
 // === Retrieval ===
 
