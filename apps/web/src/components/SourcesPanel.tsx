@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { SearchPreviewResult, Source, SourceKind } from '../lib/types';
 
@@ -18,21 +18,45 @@ const KIND_GLYPH: Record<SourceKind, string> = {
   youtube: '▶',
 };
 
+/** Stop auto-polling after this long — anything still pending/parsing past this
+ *  point is probably stuck in Ragflow and needs the user to look at it. */
+const AUTO_REFRESH_TIMEOUT_MS = 10 * 60 * 1000;
+const AUTO_REFRESH_INTERVAL_MS = 5_000;
+
 export function SourcesPanel({ notebookId }: Props) {
   const qc = useQueryClient();
   const sources = useQuery({
     queryKey: ['sources', notebookId],
     queryFn: () => api.listSources(notebookId),
-    refetchInterval: (q) => {
-      const items = q.state.data?.sources ?? [];
-      return items.some((s) => s.status === 'pending' || s.status === 'parsing') ? 3000 : false;
-    },
   });
 
   const refresh = useMutation({
     mutationFn: () => api.refreshSources(notebookId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sources', notebookId] }),
   });
+
+  // Auto-poll Ragflow and update SQLite while anything is still pending/parsing.
+  // Without this, the GET /sources polling never sees the transition from
+  // parsing → ready: Ragflow has the chunks, but our SQLite mirror only updates
+  // when POST /sources/refresh runs (the ↻ button).
+  const items = sources.data?.sources ?? [];
+  const hasInFlight = items.some((s) => s.status === 'pending' || s.status === 'parsing');
+  const oldestInFlight = items
+    .filter((s) => s.status === 'pending' || s.status === 'parsing')
+    .map((s) => +new Date(s.createdAt))
+    .reduce((min, t) => (min === 0 || t < min ? t : min), 0);
+  const inFlightTooLong = oldestInFlight > 0 && Date.now() - oldestInFlight > AUTO_REFRESH_TIMEOUT_MS;
+
+  useEffect(() => {
+    if (!hasInFlight || inFlightTooLong) return;
+    const id = setInterval(() => {
+      if (!refresh.isPending) refresh.mutate();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+    // refresh identity is stable via useMutation; only re-arm when the set of
+    // pending items changes (not on every poll tick).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasInFlight, inFlightTooLong, notebookId]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteSource(id),
@@ -52,6 +76,22 @@ export function SourcesPanel({ notebookId }: Props) {
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Источники</h2>
         <div className="flex items-center gap-2">
+          {hasInFlight && !inFlightTooLong && (
+            <span
+              className="chip-indigo animate-pulse"
+              title="Автоматически опрашиваем Ragflow — статусы обновятся сами"
+            >
+              ⟳ авто
+            </span>
+          )}
+          {inFlightTooLong && (
+            <span
+              className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+              title="Ragflow не отвечает дольше 10 минут — нажмите ↻ чтобы форсировать"
+            >
+              ⚠ зависло
+            </span>
+          )}
           <span className="text-xs text-zinc-500">
             {readyCount}/{totalCount}
           </span>
@@ -59,7 +99,7 @@ export function SourcesPanel({ notebookId }: Props) {
             onClick={() => refresh.mutate()}
             disabled={refresh.isPending}
             className="btn btn-ghost text-xs"
-            title="Обновить статусы"
+            title="Обновить статусы из Ragflow"
           >
             ↻
           </button>
