@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { SourcesPanel } from '../components/SourcesPanel';
 import { ChatPanel } from '../components/ChatPanel';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
+import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
 
 function buildArtifactMarkdown(question: string, answer: string, citations: CitationChunk[]): { title: string; contentMd: string } {
@@ -24,6 +25,7 @@ function buildArtifactMarkdown(question: string, answer: string, citations: Cita
 export default function NotebookPage() {
   const { id } = useParams<{ id: string }>();
   const notebookId = id!;
+  const { theme, toggle } = useTheme();
   const notebook = useQuery({
     queryKey: ['notebook', notebookId],
     queryFn: async () => {
@@ -50,9 +52,12 @@ export default function NotebookPage() {
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-3 dark:border-zinc-800">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-sm text-zinc-500 hover:text-zinc-900">←</Link>
+          <Link to="/" className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">←</Link>
           <h1 className="text-lg font-semibold">{notebook.data.title}</h1>
         </div>
+        <button onClick={toggle} className="btn btn-ghost text-base" title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}>
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
       </header>
       <div className="grid flex-1 grid-cols-1 md:grid-cols-[280px_1fr_360px] overflow-hidden">
         <aside className="border-r border-zinc-200 dark:border-zinc-800">

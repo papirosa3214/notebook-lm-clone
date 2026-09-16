@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { api } from '../lib/api';
+import { useTheme } from '../hooks/useTheme';
 
 export default function HomePage() {
   const qc = useQueryClient();
   const [title, setTitle] = useState('');
+  const { theme, toggle } = useTheme();
 
   const notebooks = useQuery({
     queryKey: ['notebooks'],
@@ -27,7 +29,12 @@ export default function HomePage() {
     <div className="mx-auto max-w-3xl px-6 py-10">
       <header className="mb-8 flex items-baseline justify-between">
         <h1 className="text-2xl font-semibold">Notebooks</h1>
-        <span className="text-sm text-zinc-500">NotebookLM clone · MVP</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-zinc-500">NotebookLM clone · MVP</span>
+          <button onClick={toggle} className="btn btn-ghost text-base" title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}>
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+        </div>
       </header>
 
       <form
