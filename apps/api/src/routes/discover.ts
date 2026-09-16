@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { nanoid } from 'nanoid';
 import {
   SearchAddBatchRequestSchema,
@@ -12,6 +12,11 @@ import { notebooks, sources } from '../db/schema.js';
 import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { searchWeb } from '../extractors/websearch.js';
 import { addSourceText } from '../vectordb/client.js';
+import { runIngest } from '../lib/ingestRun.js';
+
+function wantsStream(req: FastifyRequest): boolean {
+  return (req.query as { stream?: string } | undefined)?.stream === '1';
+}
 
 /**
  * Discover / search-and-add (NotebookLM-style):
@@ -51,7 +56,6 @@ export const discoverRoutes: FastifyPluginAsync = async (app) => {
       const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
       if (!nb) return reply.code(404).send({ error: 'notebook not found' });
 
-      // Insert pending rows up front so the UI sees them appear immediately.
       const localIds = parsed.data.urls.map(() => nanoid(12));
       parsed.data.urls.forEach((url, i) => {
         const u = new URL(url);
@@ -67,36 +71,60 @@ export const discoverRoutes: FastifyPluginAsync = async (app) => {
           .run();
       });
 
-      const added: Array<{ id: string; title: string; url: string; status: string; error?: string }> = [];
-      for (let i = 0; i < parsed.data.urls.length; i++) {
-        const url = parsed.data.urls[i]!;
-        const localId = localIds[i]!;
-        try {
-          const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
-          await addSourceText({
-            notebookId: req.params.id,
-            sourceId: localId,
-            kind: 'url',
-            title: fetchedTitle,
-            url,
-            content: markdown,
-          });
-          db.update(sources)
-            .set({ title: fetchedTitle, status: 'ready' })
-            .where(eq(sources.id, localId))
-            .run();
-          added.push({ id: localId, title: fetchedTitle, url, status: 'ready' });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          db.update(sources)
-            .set({ status: 'failed', error: msg })
-            .where(eq(sources.id, localId))
-            .run();
-          added.push({ id: localId, title: url, url, status: 'failed', error: msg });
-        }
-      }
+      const total = parsed.data.urls.length;
+      const result = await runIngest({
+        reply,
+        wantsStream: wantsStream(req),
+        ingest: async (emit) => {
+          const added: Array<{ id: string; title: string; url: string; status: string; error?: string }> = [];
+          for (let i = 0; i < parsed.data.urls.length; i++) {
+            const url = parsed.data.urls[i]!;
+            const localId = localIds[i]!;
+            const stageBase = i / total;
+            try {
+              emit.progress(
+                'fetching',
+                stageBase + 0.1 / total,
+                `(${i + 1}/${total}) Загружаю ${new URL(url).hostname}…`,
+              );
+              const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
+              emit.progress(
+                'embedding',
+                stageBase + 0.3 / total,
+                `(${i + 1}/${total}) Embeddings…`,
+              );
+              await addSourceText({
+                notebookId: req.params.id,
+                sourceId: localId,
+                kind: 'url',
+                title: fetchedTitle,
+                url,
+                content: markdown,
+              });
+              emit.progress(
+                'storing',
+                stageBase + 0.4 / total,
+                `(${i + 1}/${total}) Сохраняю…`,
+              );
+              db.update(sources)
+                .set({ title: fetchedTitle, status: 'ready' })
+                .where(eq(sources.id, localId))
+                .run();
+              added.push({ id: localId, title: fetchedTitle, url, status: 'ready' });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              db.update(sources)
+                .set({ status: 'failed', error: msg })
+                .where(eq(sources.id, localId))
+                .run();
+              added.push({ id: localId, title: url, url, status: 'failed', error: msg });
+            }
+          }
+          return SearchAddBatchResponseSchema.parse({ added });
+        },
+      });
 
-      return SearchAddBatchResponseSchema.parse({ added });
+      if (result) return reply.code(201).send(result);
     },
   );
 };

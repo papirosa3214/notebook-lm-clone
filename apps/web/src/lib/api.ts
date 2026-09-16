@@ -2,6 +2,7 @@ import type {
   Artifact,
   ChatDelta,
   CitationChunk,
+  IngestProgressDelta,
   Notebook,
   ProviderId,
   SearchAddBatchResponse,
@@ -37,6 +38,45 @@ export const api = {
     http<Notebook>('/api/notebooks', { method: 'POST', body: JSON.stringify({ title }) }),
   deleteNotebook: (id: string) =>
     http<void>(`/api/notebooks/${id}`, { method: 'DELETE' }),
+
+  /**
+   * SSE-streamed ingest of a URL source. Yields progress events; caller can
+   * abort() to cancel. The promise resolves with the final Source on 'done'
+   * or rejects with the error message on 'error'.
+   */
+  ingestUrlSourceStream(
+    notebookId: string,
+    body: { url: string; title?: string },
+    onProgress?: (delta: IngestProgressDelta) => void,
+  ): { promise: Promise<Source>; abort: () => void } {
+    return openIngestStream(
+      `/api/notebooks/${notebookId}/sources/url?stream=1`,
+      body,
+      onProgress,
+    );
+  },
+  ingestYoutubeSourceStream(
+    notebookId: string,
+    body: { url: string; title?: string },
+    onProgress?: (delta: IngestProgressDelta) => void,
+  ): { promise: Promise<Source>; abort: () => void } {
+    return openIngestStream(
+      `/api/notebooks/${notebookId}/sources/youtube?stream=1`,
+      body,
+      onProgress,
+    );
+  },
+  ingestSearchAddBatchStream(
+    notebookId: string,
+    body: { urls: string[] },
+    onProgress: (delta: IngestProgressDelta) => void,
+  ): { promise: Promise<SearchAddBatchResponse>; abort: () => void } {
+    return openIngestStream(
+      `/api/notebooks/${notebookId}/search-add-batch?stream=1`,
+      body,
+      onProgress,
+    );
+  },
 
   // sources
   listSources: (notebookId: string) =>
@@ -124,3 +164,55 @@ export const api = {
 
 export { ApiError };
 export type { ChatDelta };
+
+// ----- SSE ingest helper -----
+
+function openIngestStream<T>(
+  url: string,
+  body: unknown,
+  onProgress?: (delta: IngestProgressDelta) => void,
+): { promise: Promise<T>; abort: () => void } {
+  const controller = new AbortController();
+  const promise = (async () => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let finalSource: T | undefined;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n\n')) !== -1) {
+        const block = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        const line = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        const json = line.slice(5).trim();
+        if (!json) continue;
+        try {
+          const delta = JSON.parse(json) as IngestProgressDelta;
+          if (delta.type === 'progress') onProgress?.(delta);
+          else if (delta.type === 'done') finalSource = delta.source as T;
+          else if (delta.type === 'error') throw new Error(delta.message);
+        } catch (err) {
+          if (err instanceof Error) throw err;
+          // ignore malformed chunk
+        }
+      }
+    }
+    if (!finalSource) throw new Error('stream closed without done event');
+    return finalSource;
+  })();
+  return { promise, abort: () => controller.abort() };
+}

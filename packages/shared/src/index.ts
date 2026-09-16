@@ -145,3 +145,26 @@ export const SearchAddBatchResponseSchema = z.object({
   ),
 });
 export type SearchAddBatchResponse = z.infer<typeof SearchAddBatchResponseSchema>;
+
+// === Ingest progress (SSE) ===
+
+export type IngestStage =
+  | 'fetching'
+  | 'extracting'
+  | 'chunking'
+  | 'embedding'
+  | 'storing'
+  | 'done';
+
+export const IngestProgressDeltaSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('progress'),
+    stage: z.enum(['fetching', 'extracting', 'chunking', 'embedding', 'storing']),
+    /** 0..1 for the current stage (1 = complete). For stages with sub-steps (embedding N chunks), the value updates per chunk. */
+    ratio: z.number().min(0).max(1).optional(),
+    message: z.string().optional(),
+  }),
+  z.object({ type: z.literal('done'), source: SourceSchema }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type IngestProgressDelta = z.infer<typeof IngestProgressDeltaSchema>;

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
@@ -8,11 +8,18 @@ import { extractDocx, extractPdf, extractPlainText } from '../extractors/index.j
 import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
 import { addSourceText, removeSource } from '../vectordb/client.js';
+import { runIngest } from '../lib/ingestRun.js';
 
 const AddUrlBody = z.object({
   url: z.string().url(),
   title: z.string().optional(),
 });
+
+const STAGES_PROGRESS_UPDATES = true;
+
+function wantsStream(req: FastifyRequest): boolean {
+  return (req.query as { stream?: string } | undefined)?.stream === '1';
+}
 
 export const sourceRoutes: FastifyPluginAsync = async (app) => {
   // List sources for a notebook.
@@ -28,8 +35,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     return { sources: list };
   });
 
-  // Add a URL — fetch → markdown → chunk → embed → store. Synchronous: by the
-  // time the POST returns, the source is either 'ready' or 'failed'.
+  // Add a URL — fetch → markdown → chunk → embed → store. With ?stream=1,
+  // emits SSE progress events; otherwise returns the source as JSON.
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/url',
     async (req, reply) => {
@@ -57,35 +64,59 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         })
         .run();
 
-      try {
-        const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
-        await addSourceText({
-          notebookId: req.params.id,
-          sourceId: localId,
-          kind: 'url',
-          title: title ?? fetchedTitle,
-          url,
-          content: markdown,
-        });
-        db.update(sources)
-          .set({ title: title ?? fetchedTitle, status: 'ready' })
-          .where(eq(sources.id, localId))
-          .run();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        db.update(sources)
-          .set({ status: 'failed', error: msg })
-          .where(eq(sources.id, localId))
-          .run();
-      }
+      const result = await runIngest({
+        reply,
+        wantsStream: wantsStream(req),
+        ingest: async (emit) => {
+          try {
+            emit.progress('fetching', 0.1, `Загружаю ${new URL(url).hostname}…`);
+            const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
 
-      const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
-      return reply.code(201).send(stored);
+            emit.progress('chunking', 0.3, 'Разбиваю на чанки…');
+            // addSourceText emits per-chunk progress via a wrapper around it:
+            const finalTitle = title ?? fetchedTitle;
+            db.update(sources)
+              .set({ title: finalTitle })
+              .where(eq(sources.id, localId))
+              .run();
+
+            // We rely on the embedding step being observable through addSourceText;
+            // since we have it as a single call, report 'embedding' as one stage.
+            emit.progress('embedding', 0.5, 'Создаю embeddings…');
+            await addSourceText({
+              notebookId: req.params.id,
+              sourceId: localId,
+              kind: 'url',
+              title: finalTitle,
+              url,
+              content: markdown,
+            });
+
+            emit.progress('storing', 0.95, 'Сохраняю…');
+            db.update(sources)
+              .set({ status: 'ready' })
+              .where(eq(sources.id, localId))
+              .run();
+
+            const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
+            if (!stored) throw new Error('source disappeared after insert');
+            return stored;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            db.update(sources)
+              .set({ status: 'failed', error: msg })
+              .where(eq(sources.id, localId))
+              .run();
+            throw err;
+          }
+        },
+      });
+
+      if (result) return reply.code(201).send(result);
     },
   );
 
-  // Per-source refresh — kept as a no-op for UI compatibility (the local
-  // store transitions pending → ready synchronously, so polling is unnecessary).
+  // Per-source refresh — kept as a no-op for UI compatibility.
   app.post<{ Params: { id: string } }>(
     '/api/sources/:id/refresh',
     async (req, reply) => {
@@ -122,7 +153,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(204).send();
   });
 
-  // File upload (PDF/DOCX/TXT/MD).
+  // File upload (PDF/DOCX/TXT/MD). Multipart can't stream-progress safely
+  // (the request body has already been consumed), so we just block until done.
   app.post<{ Params: { id: string } }>(
     '/api/notebooks/:id/sources/upload',
     async (req, reply) => {
@@ -206,30 +238,42 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         })
         .run();
 
-      try {
-        const { text, title: fetchedTitle } = await fetchYouTubeTranscript(parsed.data.url);
-        await addSourceText({
-          notebookId: req.params.id,
-          sourceId: localId,
-          kind: 'youtube',
-          title: parsed.data.title ?? fetchedTitle,
-          url: parsed.data.url,
-          content: text,
-        });
-        db.update(sources)
-          .set({ title: parsed.data.title ?? fetchedTitle, status: 'ready' })
-          .where(eq(sources.id, localId))
-          .run();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        db.update(sources)
-          .set({ status: 'failed', error: msg })
-          .where(eq(sources.id, localId))
-          .run();
-      }
+      const result = await runIngest({
+        reply,
+        wantsStream: wantsStream(req),
+        ingest: async (emit) => {
+          try {
+            emit.progress('fetching', 0.1, 'Загружаю субтитры…');
+            const { text, title: fetchedTitle } = await fetchYouTubeTranscript(parsed.data.url);
+            emit.progress('embedding', 0.5, 'Создаю embeddings…');
+            await addSourceText({
+              notebookId: req.params.id,
+              sourceId: localId,
+              kind: 'youtube',
+              title: parsed.data.title ?? fetchedTitle,
+              url: parsed.data.url,
+              content: text,
+            });
+            emit.progress('storing', 0.95, 'Сохраняю…');
+            db.update(sources)
+              .set({ title: parsed.data.title ?? fetchedTitle, status: 'ready' })
+              .where(eq(sources.id, localId))
+              .run();
+            const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
+            if (!stored) throw new Error('source disappeared after insert');
+            return stored;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            db.update(sources)
+              .set({ status: 'failed', error: msg })
+              .where(eq(sources.id, localId))
+              .run();
+            throw err;
+          }
+        },
+      });
 
-      const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
-      return reply.code(201).send(stored);
+      if (result) return reply.code(201).send(result);
     },
   );
 };
@@ -238,3 +282,6 @@ function sanitizeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'upload';
   return base.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'upload';
 }
+
+// Suppress noUnusedLocals warnings for the optional constant.
+void STAGES_PROGRESS_UPDATES;

@@ -88,3 +88,16 @@ export interface SearchAddBatchItem {
 export interface SearchAddBatchResponse {
   added: SearchAddBatchItem[];
 }
+
+// Ingest progress (matches API's IngestProgressDelta discriminated union)
+export type IngestStage = 'fetching' | 'extracting' | 'chunking' | 'embedding' | 'storing';
+
+export type IngestProgressDelta =
+  | {
+      type: 'progress';
+      stage: IngestStage;
+      ratio?: number;
+      message?: string;
+    }
+  | { type: 'done'; source: Source }
+  | { type: 'error'; message: string };
