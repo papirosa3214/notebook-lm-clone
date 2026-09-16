@@ -1,9 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
-import { notebooks } from '../db/schema.js';
+import { notebooks, sources } from '../db/schema.js';
 import { createDataset } from '../ragflow/client.js';
 
 const CreateBody = z.object({
@@ -41,7 +41,20 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/notebooks', async () => {
     const db = getDb();
-    return { notebooks: db.select().from(notebooks).all() };
+    const rows = db
+      .select({
+        id: notebooks.id,
+        title: notebooks.title,
+        ragflowDatasetId: notebooks.ragflowDatasetId,
+        defaultProvider: notebooks.defaultProvider,
+        defaultModel: notebooks.defaultModel,
+        createdAt: notebooks.createdAt,
+        sourceCount: sql<number>`(SELECT COUNT(*) FROM ${sources} WHERE ${sources.notebookId} = ${notebooks.id})`,
+        readySourceCount: sql<number>`(SELECT COUNT(*) FROM ${sources} WHERE ${sources.notebookId} = ${notebooks.id} AND ${sources.status} = 'ready')`,
+      })
+      .from(notebooks)
+      .all();
+    return { notebooks: rows };
   });
 
   app.get<{ Params: { id: string } }>('/api/notebooks/:id', async (req, reply) => {

@@ -1,4 +1,13 @@
-import type { Artifact, ChatDelta, CitationChunk, Notebook, ProviderId, Source } from './types';
+import type {
+  Artifact,
+  ChatDelta,
+  CitationChunk,
+  Notebook,
+  ProviderId,
+  SearchAddBatchResponse,
+  SearchPreviewResponse,
+  Source,
+} from './types';
 
 class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
@@ -63,6 +72,18 @@ export const api = {
     }>(`/api/notebooks/${notebookId}/search-and-add`, {
       method: 'POST',
       body: JSON.stringify({ query, maxResults }),
+    }),
+  /** Step 1 of Discover: just web search, no ingest. */
+  searchPreview: (notebookId: string, query: string, maxResults = 8) =>
+    http<SearchPreviewResponse>(`/api/notebooks/${notebookId}/search-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ query, maxResults }),
+    }),
+  /** Step 2 of Discover: ingest only the URLs the user picked. */
+  searchAddBatch: (notebookId: string, urls: string[]) =>
+    http<SearchAddBatchResponse>(`/api/notebooks/${notebookId}/search-add-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ urls }),
     }),
   refreshSources: (notebookId: string) =>
     http<{ sources: Source[]; changed: number }>(

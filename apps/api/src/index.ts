@@ -10,6 +10,8 @@ import { sourceRoutes } from './routes/sources.js';
 import { chatRoutes } from './routes/chat.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { searchRoutes } from './routes/search.js';
+import { discoverRoutes } from './routes/discover.js';
+import { summaryRoutes } from './routes/summary.js';
 
 async function main() {
   const app = Fastify({
@@ -49,6 +51,8 @@ async function main() {
   await app.register(chatRoutes);
   await app.register(artifactRoutes);
   await app.register(searchRoutes);
+  await app.register(discoverRoutes);
+  await app.register(summaryRoutes);
 
   const shutdown = async () => {
     app.log.info('shutting down');

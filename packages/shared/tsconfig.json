@@ -11,7 +11,8 @@
     "verbatimModuleSyntax": false,
     "noUncheckedIndexedAccess": true,
     "declaration": true,
-    "noEmit": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
     "lib": ["ES2022"],
     "types": ["node"]
   },

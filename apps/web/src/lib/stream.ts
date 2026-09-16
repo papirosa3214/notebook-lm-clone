@@ -1,4 +1,4 @@
-import type { ChatDelta } from './types';
+import type { ChatDelta, CitationChunk, SummaryDelta } from './types';
 
 export interface ChatStreamOptions {
   notebookId: string;
@@ -10,7 +10,7 @@ export interface ChatStreamOptions {
 }
 
 export interface ChatStreamHandlers {
-  onCitations?: (chunks: ChatDelta extends { type: 'citations'; chunks: infer C } ? C : never) => void;
+  onCitations?: (chunks: CitationChunk[]) => void;
   onToken?: (text: string) => void;
   onDone?: (messageId: string) => void;
   onError?: (msg: string) => void;
@@ -21,20 +21,72 @@ export interface ChatStreamHandlers {
  * Returns a cancel function.
  */
 export function streamChat(opts: ChatStreamOptions, handlers: ChatStreamHandlers): () => void {
+  return openSse(
+    `/api/notebooks/${opts.notebookId}/chat`,
+    {
+      message: opts.message,
+      provider: opts.provider,
+      model: opts.model,
+      topK: opts.topK,
+    },
+    opts.signal,
+    handlers,
+  );
+}
+
+export interface SummaryStreamOptions {
+  notebookId: string;
+  provider?: string;
+  model?: string;
+  topK?: number;
+  focus?: string;
+  signal?: AbortSignal;
+}
+
+export interface SummaryStreamHandlers {
+  onCitations?: (chunks: CitationChunk[]) => void;
+  onToken?: (text: string) => void;
+  onDone?: (summaryId: string) => void;
+  onError?: (msg: string) => void;
+}
+
+export function streamSummary(opts: SummaryStreamOptions, handlers: SummaryStreamHandlers): () => void {
+  return openSse(
+    `/api/notebooks/${opts.notebookId}/summary`,
+    {
+      provider: opts.provider,
+      model: opts.model,
+      topK: opts.topK,
+      focus: opts.focus,
+    },
+    opts.signal,
+    handlers,
+  );
+}
+
+interface ParsedHandlers {
+  onCitations?: (chunks: CitationChunk[]) => void;
+  onToken?: (text: string) => void;
+  onDone?: (id: string) => void;
+  onError?: (msg: string) => void;
+}
+
+/** Internal: shared SSE reader for chat + summary. */
+function openSse(
+  url: string,
+  body: unknown,
+  signal: AbortSignal | undefined,
+  handlers: ParsedHandlers,
+): () => void {
   const controller = new AbortController();
-  if (opts.signal) opts.signal.addEventListener('abort', () => controller.abort());
+  if (signal) signal.addEventListener('abort', () => controller.abort());
 
   void (async () => {
     try {
-      const res = await fetch(`/api/notebooks/${opts.notebookId}/chat`, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({
-          message: opts.message,
-          provider: opts.provider,
-          model: opts.model,
-          topK: opts.topK,
-        }),
+        body: JSON.stringify(body ?? {}),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -53,18 +105,18 @@ export function streamChat(opts: ChatStreamOptions, handlers: ChatStreamHandlers
         while ((nl = buf.indexOf('\n\n')) !== -1) {
           const block = buf.slice(0, nl);
           buf = buf.slice(nl + 2);
-          const line = block
-            .split('\n')
-            .find((l) => l.startsWith('data:'));
+          const line = block.split('\n').find((l) => l.startsWith('data:'));
           if (!line) continue;
           const json = line.slice(5).trim();
           if (!json) continue;
           try {
-            const delta = JSON.parse(json) as ChatDelta;
-            if (delta.type === 'citations') handlers.onCitations?.(delta.chunks as never);
+            const delta = JSON.parse(json) as ChatDelta | SummaryDelta;
+            if (delta.type === 'citations') handlers.onCitations?.(delta.chunks);
             else if (delta.type === 'token') handlers.onToken?.(delta.text);
-            else if (delta.type === 'done') handlers.onDone?.(delta.messageId);
-            else if (delta.type === 'error') handlers.onError?.(delta.message);
+            else if (delta.type === 'done') {
+              const id = 'messageId' in delta ? delta.messageId : delta.summaryId;
+              handlers.onDone?.(id);
+            } else if (delta.type === 'error') handlers.onError?.(delta.message);
           } catch {
             // ignore malformed chunk
           }

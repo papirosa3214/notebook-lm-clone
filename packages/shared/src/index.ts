@@ -85,3 +85,63 @@ export const ChatDeltaSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type ChatDelta = z.infer<typeof ChatDeltaSchema>;
+
+// === Summary (auto-overview of all sources in a notebook) ===
+
+export const SummaryRequestSchema = z.object({
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+  topK: z.number().int().min(4).max(30).optional(),
+  /** Provide additional instruction to the summary prompt (optional) */
+  focus: z.string().max(300).optional(),
+});
+export type SummaryRequest = z.infer<typeof SummaryRequestSchema>;
+
+export const SummaryDeltaSchema = z.discriminatedUnion('type', [
+  /** Sent once at the start with the citation chunks used as context */
+  z.object({ type: z.literal('citations'), chunks: z.array(CitationChunkSchema) }),
+  /** Incremental summary token */
+  z.object({ type: z.literal('token'), text: z.string() }),
+  /** Stream finished; summaryId is stable per stream so the UI can dedupe */
+  z.object({ type: z.literal('done'), summaryId: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type SummaryDelta = z.infer<typeof SummaryDeltaSchema>;
+
+// === Discover / search-and-add batch ===
+
+export const SearchPreviewRequestSchema = z.object({
+  query: z.string().min(1).max(500),
+  maxResults: z.number().int().min(1).max(15).default(8),
+});
+export type SearchPreviewRequest = z.infer<typeof SearchPreviewRequestSchema>;
+
+export const SearchPreviewResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(
+    z.object({
+      title: z.string(),
+      url: z.string(),
+      snippet: z.string(),
+    }),
+  ),
+});
+export type SearchPreviewResponse = z.infer<typeof SearchPreviewResponseSchema>;
+
+export const SearchAddBatchRequestSchema = z.object({
+  urls: z.array(z.string().url()).min(1).max(10),
+});
+export type SearchAddBatchRequest = z.infer<typeof SearchAddBatchRequestSchema>;
+
+export const SearchAddBatchResponseSchema = z.object({
+  added: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      url: z.string(),
+      status: z.string(),
+      error: z.string().optional(),
+    }),
+  ),
+});
+export type SearchAddBatchResponse = z.infer<typeof SearchAddBatchResponseSchema>;

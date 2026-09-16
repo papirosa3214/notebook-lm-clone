@@ -12,3 +12,4 @@ coverage/
 .turbo/
 .pnpm-store/
 apps/api/data/
+*.tsbuildinfo

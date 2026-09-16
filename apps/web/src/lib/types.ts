@@ -12,6 +12,8 @@ export interface Notebook {
   defaultProvider: ProviderId;
   defaultModel: string;
   createdAt: string;
+  sourceCount?: number;
+  readySourceCount?: number;
 }
 
 export interface Source {
@@ -57,4 +59,32 @@ export interface ChatMessage {
   citations?: CitationChunk[];
   pending?: boolean;
   error?: string;
+}
+
+// Summary (matches API's SummaryDelta discriminated union)
+export type SummaryDelta =
+  | { type: 'citations'; chunks: CitationChunk[] }
+  | { type: 'token'; text: string }
+  | { type: 'done'; summaryId: string }
+  | { type: 'error'; message: string };
+
+// Discover (matches SearchPreviewResponse / SearchAddBatchResponse)
+export interface SearchPreviewResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+export interface SearchPreviewResponse {
+  query: string;
+  results: SearchPreviewResult[];
+}
+export interface SearchAddBatchItem {
+  id: string;
+  title: string;
+  url: string;
+  status: string;
+  error?: string;
+}
+export interface SearchAddBatchResponse {
+  added: SearchAddBatchItem[];
 }
