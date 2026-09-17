@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamChat } from '../lib/stream';
 import type { ChatMessage, CitationChunk } from '../lib/types';
+import { Dot } from './Dot';
 import {
   SendIcon,
   StopIcon,
@@ -327,31 +328,6 @@ function MessageBubble({
       </div>
     </div>
   );
-}
-
-function Dot({ delay }: { delay: number }) {
-  return (
-    <span
-      className="h-1.5 w-1.5 rounded-full bg-subtle"
-      style={{
-        animation: `dot-pulse 1.4s ${delay}ms ease-in-out infinite`,
-      }}
-    />
-  );
-}
-
-const dotStyleSheet = `
-@keyframes dot-pulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
-  40% { opacity: 1; transform: scale(1); }
-}`;
-
-// Inject dot-pulse keyframes once
-if (typeof document !== 'undefined' && !document.getElementById('chat-dot-style')) {
-  const tag = document.createElement('style');
-  tag.id = 'chat-dot-style';
-  tag.textContent = dotStyleSheet;
-  document.head.appendChild(tag);
 }
 
 /**

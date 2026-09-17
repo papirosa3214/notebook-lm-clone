@@ -189,7 +189,7 @@ function NotebookCard({ notebook: n }: { notebook: NotebookSummary }) {
               width: `${pct}%`,
               backgroundColor:
                 pct === 100
-                  ? 'rgb(34 134 90)'
+                  ? 'rgb(var(--nb-success))'
                   : 'rgb(var(--nb-accent))',
             }}
           />

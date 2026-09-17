@@ -2,19 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamSummary } from '../lib/stream';
+import { ruPlural } from '../lib/ruPlural';
 import type { CitationChunk } from '../lib/types';
+import { Dot } from './Dot';
 import {
   SparkleIcon,
   RefreshIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   NotebookLogoMark,
 } from './icons/NotebookLogo';
 
 interface Props {
   notebookId: string;
-  /** Called when the user clicks a citation chip in the summary panel. */
-  onOpenSource?: (chunk: CitationChunk) => void;
+  /** Called when the user clicks a citation chip in the summary panel.
+   *  `index` is the 1-based display number (the `[N]` marker). */
+  onOpenSource?: (chunk: CitationChunk, index: number) => void;
 }
 
 const STORAGE_KEY = (id: string) => `nb.summary.${id}`;
@@ -219,7 +220,7 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => onOpenSource?.(c)}
+                    onClick={() => onOpenSource?.(c, i + 1)}
                     className="chip-indigo cursor-pointer transition-all hover:brightness-95"
                     title={c.text}
                   >
@@ -232,26 +233,6 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
         )}
       </div>
     </div>
-  );
-}
-
-function ruPlural(n: number): string {
-  const last = n % 10;
-  const lastTwo = n % 100;
-  if (lastTwo >= 11 && lastTwo <= 14) return 'ов';
-  if (last === 1) return '';
-  if (last >= 2 && last <= 4) return 'а';
-  return 'ов';
-}
-
-function Dot({ delay }: { delay: number }) {
-  return (
-    <span
-      className="h-1.5 w-1.5 rounded-full bg-subtle"
-      style={{
-        animation: `dot-pulse 1.4s ${delay}ms ease-in-out infinite`,
-      }}
-    />
   );
 }
 

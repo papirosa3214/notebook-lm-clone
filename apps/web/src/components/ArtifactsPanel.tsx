@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { Artifact } from '../lib/types';
 import {
@@ -37,11 +37,16 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
 
   const selected = artifacts.data?.artifacts.find((a) => a.id === selectedId);
 
-  // handle prefilled from outside (chat save button)
-  if (prefilled && !create.isPending) {
-    // fire-and-forget; useEffect would be cleaner but for MVP this is fine
+  // Drain prefilled content from the chat "save as artifact" button into a
+  // real POST. Guarded by a ref so a single prefilled value fires exactly once
+  // even if the effect re-runs (e.g. on artifacts query refetch).
+  const lastPrefilledRef = useRef<typeof prefilled>(null);
+  useEffect(() => {
+    if (!prefilled || create.isPending) return;
+    if (lastPrefilledRef.current === prefilled) return;
+    lastPrefilledRef.current = prefilled;
     create.mutate(prefilled);
-  }
+  }, [prefilled, create.isPending]); // create.mutate is stable per react-query
 
   return (
     <div className="flex h-full flex-col bg-canvas">

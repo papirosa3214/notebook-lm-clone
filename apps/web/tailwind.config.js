@@ -7,7 +7,7 @@ export default {
         // NotebookLM surface palette
         canvas: 'rgb(var(--nb-canvas) / <alpha-value>)',
         surface: 'rgb(var(--nb-surface) / <alpha-value>)',
-        surfacetint: 'rgb(var(--nb-surface-tint) / <alpha-value>)',
+        'surface-tint': 'rgb(var(--nb-surface-tint) / <alpha-value>)',
         border: 'rgb(var(--nb-border) / <alpha-value>)',
         ink: 'rgb(var(--nb-ink) / <alpha-value>)',
         muted: 'rgb(var(--nb-muted) / <alpha-value>)',
@@ -21,6 +21,8 @@ export default {
         ai: 'rgb(var(--nb-ai) / <alpha-value>)',
         'ai-ink': 'rgb(var(--nb-ai-ink) / <alpha-value>)',
         'ai-glow': 'rgb(var(--nb-ai-glow) / <alpha-value>)',
+        // Status — green check
+        success: 'rgb(var(--nb-success) / <alpha-value>)',
       },
       fontFamily: {
         sans: [
@@ -47,10 +49,6 @@ export default {
         '4xl': '2rem',
       },
       keyframes: {
-        'fade-up': {
-          '0%': { opacity: '0', transform: 'translateY(6px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },

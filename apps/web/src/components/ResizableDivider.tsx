@@ -67,7 +67,9 @@ export function ResizableDivider({
         dragging ? 'bg-accent/10' : 'hover:bg-accent/5'
       }`}
       title="Потяните, чтобы изменить ширину"
-      aria-hidden
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Граница панелей — потяните для изменения ширины"
     >
       {/* Visible 1px line */}
       <div

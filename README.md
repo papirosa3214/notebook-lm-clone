@@ -27,8 +27,7 @@ apps/
     │   ├── routes/{notebooks, sources, chat, artifacts}.ts
     │   ├── providers/{ollama, anthropic, openai}.ts
     │   ├── extractors/{index, youtube}.ts
-    │   ├── ragflow/client.ts
-    │   └── db/{schema, index}.ts
+    │   └── db/{schema, index, vector}.ts
 packages/
 └── shared/   # Zod-схемы + LLMProvider интерфейс
 ```
@@ -100,11 +99,11 @@ data: {"type":"done","messageId":"abc123"}\n\n
 
 | Endpoint | Назначение |
 |---|---|
-| `GET /api/health` | Статус API + Ragflow |
-| `POST /api/notebooks` | Создать ноутбук (+ Ragflow dataset) |
+| `GET /api/health` | Статус API |
+| `POST /api/notebooks` | Создать ноутбук |
 | `GET /api/notebooks` | Список ноутбуков |
 | `GET /api/notebooks/:id` | Один ноутбук |
-| `DELETE /api/notebooks/:id` | Удалить из SQLite (dataset в Ragflow остаётся — почистить вручную) |
+| `DELETE /api/notebooks/:id` | Удалить ноутбук (и его источники из `vec_chunks`) |
 | `GET /api/notebooks/:id/sources` | Список источников |
 | `POST /api/notebooks/:id/sources/url` | Добавить URL |
 | `POST /api/notebooks/:id/sources/youtube` | Добавить YouTube |
@@ -145,4 +144,5 @@ data: {"type":"done","messageId":"abc123"}\n\n
 - [x] Этап 4: artifacts CRUD — markdown notes with download (`0fb6e34`)
 - [x] Этап 5 (UI): React UI с трёхколоночным layout, SSE-клиент, Tailwind (`2d3d508`)
 - [x] Этап 6 (NotebookLM-фичи): summary panel, discover preview, mobile tabs (`2a2ec9c`)
-- [x] Этап 7: локальный vector store на sqlite-vec (выпилили Ragflow)
+- [x] Этап 7: локальный vector store на sqlite-vec (выпилили Ragflow) (`d890b22`)
+- [x] Этап 8 (дизайн-система): CSS-токены + Tailwind, resizable/collapsible панели, mobile tabs, citation dialog, иконки, багфиксы

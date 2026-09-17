@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { ruPlural } from '../lib/ruPlural';
 import { SourcesPanel } from '../components/SourcesPanel';
 import { ChatPanel } from '../components/ChatPanel';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
@@ -16,6 +17,7 @@ import {
   CloseIcon,
   SparkleIcon,
   PanelRightIcon,
+  SourceIcon,
 } from '../components/icons/NotebookLogo';
 
 function buildArtifactMarkdown(
@@ -108,10 +110,7 @@ export default function NotebookPage() {
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
 
-  const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
-  useEffect(() => {
-    setLayout(loadLayout());
-  }, []);
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
 
   const updateLayout = useCallback((patch: Partial<LayoutState>) => {
     setLayout((prev) => {
@@ -125,32 +124,25 @@ export default function NotebookPage() {
     });
   }, []);
 
-  // Live drag — doesn't re-render NotebookPage; updates panel widths directly.
-  const onResizeLeft = useCallback((delta: number) => {
-    setLayout((prev) => {
-      if (prev.sourcesCollapsed) return prev;
-      const next = clamp(prev.sourcesWidth + delta, MIN_PANEL, MAX_PANEL);
-      if (next === prev.sourcesWidth) return prev;
-      const stored = { ...prev, sourcesWidth: next };
-      try {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(stored));
-      } catch {}
-      return stored;
-    });
-  }, []);
+  // Live drag — drives both the visible width (via setLayout) and the
+  // persisted layout so a reload keeps the user's choice.
+  const onResizeLeft = useCallback(
+    (delta: number) => {
+      if (layout.sourcesCollapsed) return;
+      const next = clamp(layout.sourcesWidth + delta, MIN_PANEL, MAX_PANEL);
+      if (next !== layout.sourcesWidth) updateLayout({ sourcesWidth: next });
+    },
+    [layout.sourcesWidth, layout.sourcesCollapsed, updateLayout],
+  );
 
-  const onResizeRight = useCallback((delta: number) => {
-    setLayout((prev) => {
-      if (prev.notesCollapsed) return prev;
-      const next = clamp(prev.notesWidth - delta, MIN_PANEL, MAX_PANEL);
-      if (next === prev.notesWidth) return prev;
-      const stored = { ...prev, notesWidth: next };
-      try {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(stored));
-      } catch {}
-      return stored;
-    });
-  }, []);
+  const onResizeRight = useCallback(
+    (delta: number) => {
+      if (layout.notesCollapsed) return;
+      const next = clamp(layout.notesWidth - delta, MIN_PANEL, MAX_PANEL);
+      if (next !== layout.notesWidth) updateLayout({ notesWidth: next });
+    },
+    [layout.notesWidth, layout.notesCollapsed, updateLayout],
+  );
 
   if (notebook.isLoading) {
     return (
@@ -238,13 +230,7 @@ export default function NotebookPage() {
             side="left"
             onExpand={() => updateLayout({ sourcesCollapsed: false })}
             label="Источники"
-            icon={
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="9" />
-                <path d="M3 12h18" />
-                <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
-              </svg>
-            }
+            icon={<SourceIcon kind="url" size={16} />}
           />
         ) : (
           <aside
@@ -279,7 +265,7 @@ export default function NotebookPage() {
             {hasReadySources ? (
               <SummaryPanel
                 notebookId={notebookId}
-                onOpenSource={(chunk) => setOpenCitation({ chunk, index: 0 })}
+                onOpenSource={(chunk, index) => setOpenCitation({ chunk, index })}
               />
             ) : (
               <EmptyCentreState hasAnySources={hasSources} />
@@ -411,15 +397,6 @@ function EmptyCentreState({ hasAnySources }: { hasAnySources: boolean }) {
   );
 }
 
-function ruPlural(n: number): string {
-  const last = n % 10;
-  const lastTwo = n % 100;
-  if (lastTwo >= 11 && lastTwo <= 14) return 'ов';
-  if (last === 1) return '';
-  if (last >= 2 && last <= 4) return 'а';
-  return 'ов';
-}
-
 function CitationDialog({
   chunk,
   index,
@@ -429,6 +406,13 @@ function CitationDialog({
   index: number;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div className="modal-backdrop animate-fade-in" onClick={onClose}>
       <div
@@ -445,7 +429,7 @@ function CitationDialog({
               {chunk.sourceTitle}
             </h3>
           </div>
-          <button onClick={onClose} className="btn-icon" title="Закрыть">
+          <button type="button" onClick={onClose} className="btn-icon" title="Закрыть" aria-label="Закрыть">
             <CloseIcon size={16} />
           </button>
         </div>
