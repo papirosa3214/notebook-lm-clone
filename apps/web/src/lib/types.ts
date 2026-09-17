@@ -24,6 +24,9 @@ export interface Source {
   status: SourceStatus;
   error: string | null;
   createdAt: string;
+  summary: string | null;
+  summaryTopics: string[] | null;
+  summarizedAt: string | null;
 }
 
 export interface CitationChunk {

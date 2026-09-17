@@ -8,6 +8,7 @@ import type {
   Source,
   SourceKind,
 } from '../lib/types';
+import { SourceDetailSheet } from './SourceDetailSheet';
 import {
   SourceIcon,
   PlusIcon,
@@ -51,6 +52,9 @@ export function SourcesPanel({ notebookId }: Props) {
     queryKey: ['sources', notebookId],
     queryFn: () => api.listSources(notebookId),
   });
+  // null = closed; otherwise the source currently shown in the detail
+  // sheet. Kept local to this panel so the sheet lives and dies with it.
+  const [openSource, setOpenSource] = useState<Source | null>(null);
 
   const refresh = useMutation({
     mutationFn: () => api.refreshSources(notebookId),
@@ -119,7 +123,12 @@ export function SourcesPanel({ notebookId }: Props) {
         )}
         <ul className="space-y-2">
           {sources.data?.sources.map((s) => (
-            <SourceItem key={s.id} source={s} onDelete={() => setPendingDelete(s)} />
+            <SourceItem
+              key={s.id}
+              source={s}
+              onSelect={() => setOpenSource(s)}
+              onDelete={() => setPendingDelete(s)}
+            />
           ))}
         </ul>
       </div>
@@ -141,6 +150,12 @@ export function SourcesPanel({ notebookId }: Props) {
             setPendingDelete(null);
           }}
           onClose={() => setPendingDelete(null)}
+        />
+      )}
+      {openSource && (
+        <SourceDetailSheet
+          source={openSource}
+          onClose={() => setOpenSource(null)}
         />
       )}
     </div>
@@ -203,7 +218,15 @@ function EmptyState({ onDiscover }: { onDiscover: () => void }) {
   );
 }
 
-function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => void }) {
+function SourceItem({
+  source: s,
+  onSelect,
+  onDelete,
+}: {
+  source: Source;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
   const statusBadge = {
     pending: { text: '⏳', cls: 'bg-surface-tint text-muted' },
     parsing: {
@@ -218,42 +241,67 @@ function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => v
   }[s.status];
   return (
     <li className="source-pill group">
-      <span className="kind-pill" title={KIND_LABEL[s.kind]}>
-        <SourceIcon kind={s.kind} size={14} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium" title={s.title}>
-          {s.title}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge.cls}`}
-          >
-            {statusBadge.text}
-          </span>
-          {s.url && (
-            <a
-              href={s.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="truncate text-[10px] text-muted hover:text-accent hover:underline"
-              title={s.url}
+      {/*
+        The whole row is a click target that opens the detail sheet. The
+        delete button is a sibling so it can stop propagation — clicking
+        the trash icon should NOT also open the sheet.
+      */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        title="Открыть краткое содержание"
+      >
+        <span className="kind-pill shrink-0" title={KIND_LABEL[s.kind]}>
+          <SourceIcon kind={s.kind} size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium" title={s.title}>
+            {s.title}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge.cls}`}
             >
-              {prettyHost(s.url)}
-            </a>
+              {statusBadge.text}
+            </span>
+            {s.url && (
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="truncate text-[10px] text-muted hover:text-accent hover:underline"
+                title={s.url}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {prettyHost(s.url)}
+              </a>
+            )}
+          </div>
+          {/* Per-source summary preview — empty state tells the user the
+              server is still generating or that they can force a regen
+              from the detail sheet. */}
+          {s.summary && (
+            <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted">
+              {s.summary}
+            </div>
+          )}
+          {s.error && (
+            <div className="mt-1 truncate text-[10px] text-red-600" title={s.error}>
+              {s.error}
+            </div>
           )}
         </div>
-        {s.error && (
-          <div className="mt-1 truncate text-[10px] text-red-600" title={s.error}>
-            {s.error}
-          </div>
-        )}
-      </div>
+      </button>
       <button
-        onClick={onDelete}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
         className="btn-icon opacity-0 transition-opacity group-hover:opacity-100"
         title="Удалить источник"
         style={{ color: 'rgb(var(--nb-muted))' }}
+        type="button"
       >
         <TrashIcon size={13} />
       </button>

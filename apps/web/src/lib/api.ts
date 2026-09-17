@@ -142,6 +142,17 @@ export const api = {
   deleteSource: (id: string) =>
     http<void>(`/api/sources/${id}`, { method: 'DELETE' }),
 
+  // per-source summary (server-side cache; backend generates on demand if empty)
+  getSourceSummary: (id: string) =>
+    http<{ summary: string; topics: string[]; generatedAt: string }>(
+      `/api/sources/${id}/summary`,
+    ),
+  regenerateSourceSummary: (id: string) =>
+    http<{ summary: string; topics: string[]; generatedAt: string }>(
+      `/api/sources/${id}/summary/refresh`,
+      { method: 'POST' },
+    ),
+
   // retrieval (preview)
   retrieve: (notebookId: string, q: string, topK = 5) =>
     http<{ chunks: unknown[]; citations: CitationChunk[] }>(
