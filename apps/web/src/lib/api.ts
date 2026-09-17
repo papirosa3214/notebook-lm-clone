@@ -17,17 +17,23 @@ class ApiError extends Error {
 }
 
 async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
+  // Only set Content-Type: application/json when we actually have a body.
+  // Fastify rejects empty bodies sent with that Content-Type
+  // (FST_ERR_CTP_EMPTY_JSON_BODY → 400), so DELETE /api/sources/:id and
+  // DELETE /api/notebooks/:id never reached the route handler at all.
+  const headers = new Headers(init.headers ?? {});
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  const res = await fetch(path, { ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body);
   }
+  // 204 No Content (DELETE responses) has an empty body — `res.json()` would
+  // throw "Unexpected end of JSON input" and the mutation would reject, so
+  // TanStack Query's onSuccess never runs and the UI doesn't refetch.
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
