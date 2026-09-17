@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
 import { RefreshIcon } from './icons/NotebookLogo';
@@ -53,8 +53,6 @@ export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
   const [savedAt, setSavedAt] = useState<string | null>(initial?.savedAt ?? null);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Auto-refresh gate — Strict-Mode probe mount must not double-stream.
-  const startedRef = useRef(false);
 
   function refresh() {
     setError(null);
@@ -93,17 +91,9 @@ export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
     );
   }
 
-  // Auto-refresh on first mount if no cached summary and we have ready
-  // sources. The ref survives Strict-Mode probe unmount so we don't
-  // double-stream.
-  useEffect(() => {
-    if (startedRef.current) return;
-    if (content.length > 0) return;
-    if (readyCount === 0) return;
-    startedRef.current = true;
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Auto-refresh intentionally NOT triggered here — under React
+  // Strict-Mode the probe mount races with the actual mount and ends
+  // up double-streaming. The user clicks the ↻ button to generate.
 
   // Hide entirely until we have something to show.
   if (!streaming && content.length === 0 && !error) return null;

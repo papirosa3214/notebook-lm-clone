@@ -40,7 +40,7 @@ test.describe('chat panel — end-to-end', () => {
       { timeout: 30_000 },
     );
 
-    await input.fill('Кратко: что в этих источниках?');
+    await input.fill('Кратко: что в этих источниках? Перечисли основные темы.');
     await page.locator('button[title="Отправить (Enter)"]').first().click();
 
     const chatResponse = await chatResponsePromise;
@@ -61,9 +61,15 @@ test.describe('chat panel — end-to-end', () => {
     // stream closed without sending a `done` event.
     const assistantBubble = page.locator('.prose-chat').last();
     await expect(assistantBubble).toBeVisible({ timeout: 30_000 });
-    await expect(assistantBubble).not.toContainText(/Загружаю модель/, { timeout: 30_000 });
+    // Generous timeout: Ollama on the inference box occasionally takes
+    // 30-60s on the first request after a cold load of qwen3.6-27b.
+    await expect(assistantBubble).not.toContainText(/Загружаю модель/, { timeout: 90_000 });
     const text = (await assistantBubble.textContent())?.trim() ?? '';
-    expect(text.length).toBeGreaterThan(0);
+    // The question asks for ≥1 theme — even short answers should clear
+    // 5 chars. We don't gate on a larger number because Ollama on this
+    // notebook occasionally returns a terse 12-token greeting that the
+    // user wouldn't consider "broken".
+    expect(text.length).toBeGreaterThan(5);
   });
 
   test('summary panel does not spin forever on reload', async ({ page }) => {

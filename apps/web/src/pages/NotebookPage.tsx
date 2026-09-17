@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
 import { SourcesPanel } from '../components/SourcesPanel';
+import { SourcesStrip } from '../components/SourcesStrip';
 import { ChatPanel } from '../components/ChatPanel';
 import { PanelErrorBoundary } from '../components/ErrorBoundary';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
@@ -46,6 +47,8 @@ interface LayoutState {
   notesWidth: number;
   sourcesCollapsed: boolean;
   notesCollapsed: boolean;
+  /** Which page-level layout to render. */
+  mode: 'threeColumn' | 'notebooklm';
 }
 
 const DEFAULT_LAYOUT: LayoutState = {
@@ -57,6 +60,7 @@ const DEFAULT_LAYOUT: LayoutState = {
   // through the chat's "сохранить в заметки" button. Users who want
   // a dedicated notes panel can open it from the right rail.
   notesCollapsed: true,
+  mode: 'threeColumn',
 };
 
 const LAYOUT_KEY = 'nb.layout';
@@ -81,6 +85,7 @@ function loadLayout(): LayoutState {
       ),
       sourcesCollapsed: Boolean(parsed.sourcesCollapsed),
       notesCollapsed: Boolean(parsed.notesCollapsed),
+      mode: parsed.mode === 'notebooklm' ? 'notebooklm' : 'threeColumn',
     };
   } catch {
     return DEFAULT_LAYOUT;
@@ -211,6 +216,22 @@ export default function NotebookPage() {
           >
             {theme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
+          <button
+            type="button"
+            onClick={() =>
+              updateLayout({
+                mode: layout.mode === 'threeColumn' ? 'notebooklm' : 'threeColumn',
+              })
+            }
+            className="btn-icon"
+            title={
+              layout.mode === 'threeColumn'
+                ? 'Переключить в NotebookLM-стиль (горизонтальные источники сверху)'
+                : 'Вернуть трёхколонный layout'
+            }
+          >
+            {layout.mode === 'threeColumn' ? '⇆' : '☰'}
+          </button>
         </div>
       </header>
 
@@ -236,7 +257,40 @@ export default function NotebookPage() {
         </MobileTabBtn>
       </nav>
 
+      {/* ---- NotebookLM-style layout: horizontal source strip + chat ---- */}
+      {layout.mode === 'notebooklm' && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <SourcesStrip notebookId={notebookId} />
+          <div className="flex min-h-0 flex-1 overflow-hidden p-3 md:p-6">
+            <div className="hidden min-h-0 flex-1 overflow-hidden md:rounded-2xl md:border md:bg-surface md:shadow-soft md:flex"
+              style={{ borderColor: 'rgb(var(--nb-border))' }}>
+              <PanelErrorBoundary panel="Чат">
+                <ChatPanel
+                  notebookId={notebookId}
+                  onSaveArtifact={(question, answer, citations) => {
+                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                  }}
+                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
+            </div>
+            <div className="flex w-full flex-1 md:hidden">
+              <PanelErrorBoundary panel="Чат">
+                <ChatPanel
+                  notebookId={notebookId}
+                  onSaveArtifact={(question, answer, citations) => {
+                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                  }}
+                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ---- Three-column layout (resizable + collapsible) ---- */}
+      {layout.mode === 'threeColumn' && (
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* LEFT — Sources (or collapsed rail) */}
         {layout.sourcesCollapsed ? (
@@ -361,6 +415,7 @@ export default function NotebookPage() {
           </aside>
         )}
       </div>
+      )}
 
       {openCitation && (
         <CitationDialog
