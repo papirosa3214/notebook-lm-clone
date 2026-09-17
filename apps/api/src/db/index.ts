@@ -52,7 +52,11 @@ function migrate(sqlite: Database.Database) {
       url TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'parsing', 'ready', 'failed')),
       error TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      -- Per-source summary cache; populated by summarizeSource()
+      summary TEXT,
+      summary_topics TEXT,
+      summarized_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_sources_notebook ON sources(notebook_id);
@@ -119,14 +123,38 @@ function migrate(sqlite: Database.Database) {
         url TEXT,
         status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'parsing', 'ready', 'failed')),
         error TEXT,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        summary TEXT,
+        summary_topics TEXT,
+        summarized_at TEXT
       );
-      INSERT INTO _sources_new (id, notebook_id, kind, title, url, status, error, created_at)
-        SELECT id, notebook_id, kind, title, url, status, error, created_at FROM sources;
+      INSERT INTO _sources_new (id, notebook_id, kind, title, url, status, error, created_at,
+                               summary, summary_topics, summarized_at)
+        SELECT id, notebook_id, kind, title, url, status, error, created_at,
+               summary, summary_topics, summarized_at FROM sources;
       DROP TABLE sources;
       ALTER TABLE _sources_new RENAME TO sources;
       CREATE INDEX idx_sources_notebook ON sources(notebook_id);
     `);
+  }
+
+  // Forward-only ADD COLUMN migrations. SQLite ALTER TABLE ADD COLUMN
+  // never fails on an existing column (it's a no-op) so this is safe to
+  // run on every boot. We keep one block per phase so it's clear which
+  // migration introduced which column.
+  addColumnIfMissing(sqlite, 'sources', 'summary', 'TEXT');
+  addColumnIfMissing(sqlite, 'sources', 'summary_topics', 'TEXT');
+  addColumnIfMissing(sqlite, 'sources', 'summarized_at', 'TEXT');
+}
+
+function addColumnIfMissing(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+  typeDecl: string,
+): void {
+  if (!columnExists(sqlite, table, column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeDecl}`);
   }
 }
 

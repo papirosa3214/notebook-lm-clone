@@ -9,6 +9,7 @@ import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
 import { addSourceText, removeSource } from '../vectordb/client.js';
 import { runIngest } from '../lib/ingestRun.js';
+import { summarizeSource } from '../lib/summarizeSource.js';
 import { autoPrepareEmbedding, autoReleaseEmbedding } from '../embedding/lifecycle.js';
 
 const AddUrlBody = z.object({
@@ -107,6 +108,16 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .set({ status: 'ready' })
               .where(eq(sources.id, localId))
               .run();
+
+            // Fire-and-forget per-source summary — we don't want ingest
+            // latency to depend on a second LLM call. summarizeSource()
+            // is idempotent (DB guard short-circuits if already filled).
+            void summarizeSource(localId, {
+              provider: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+            });
 
             const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
             if (!stored) throw new Error('source disappeared after insert');
@@ -215,6 +226,14 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
           .set({ status: 'ready' })
           .where(eq(sources.id, localId))
           .run();
+        // Fire-and-forget per-source summary — same rationale as URL/YouTube
+        // paths above. The notebook's default provider/model is used.
+        void summarizeSource(localId, {
+          provider: nb.defaultProvider,
+          model: nb.defaultModel,
+        }).catch((err) => {
+          app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         db.update(sources)
@@ -282,6 +301,13 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .set({ title: parsed.data.title ?? fetchedTitle, status: 'ready' })
               .where(eq(sources.id, localId))
               .run();
+            // Fire-and-forget per-source summary.
+            void summarizeSource(localId, {
+              provider: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+            });
             const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
             if (!stored) throw new Error('source disappeared after insert');
             return stored;
@@ -301,11 +327,61 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
       if (result) return reply.code(201).send(result);
     },
   );
+
+  // Per-source summary — read or generate on demand.
+  // Returns `{ summary, topics, generatedAt }` or 425 if the source is
+  // not yet ready (chunks not ingested).
+  app.get<{ Params: { id: string } }>('/api/sources/:id/summary', async (req, reply) => {
+    const db = getDb();
+    const row = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
+    if (!row) return reply.code(404).send({ error: 'source not found' });
+    if (row.status !== 'ready') {
+      return reply.code(425).send({ error: `source status is '${row.status}', not ready` });
+    }
+    if (row.summary && row.summarizedAt) {
+      return {
+        summary: row.summary,
+        topics: row.summaryTopics ? safeParseTopics(row.summaryTopics) : [],
+        generatedAt: row.summarizedAt,
+      };
+    }
+    // Cached empty → generate synchronously and persist.
+    const result = await summarizeSource(req.params.id, { force: false });
+    if (!result) return reply.code(500).send({ error: 'summarization failed' });
+    return result;
+  });
+
+  // Force-regenerate per-source summary (e.g. user clicks "Перегенерировать"
+  // in the source-detail sheet). Bypasses the DB short-circuit.
+  app.post<{ Params: { id: string } }>(
+    '/api/sources/:id/summary/refresh',
+    async (req, reply) => {
+      const db = getDb();
+      const row = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
+      if (!row) return reply.code(404).send({ error: 'source not found' });
+      if (row.status !== 'ready') {
+        return reply.code(425).send({ error: `source status is '${row.status}', not ready` });
+      }
+      const result = await summarizeSource(req.params.id, { force: true });
+      if (!result) return reply.code(500).send({ error: 'summarization failed' });
+      return result;
+    },
+  );
 };
 
 function sanitizeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'upload';
   return base.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'upload';
+}
+
+function safeParseTopics(raw: string): string[] {
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((t): t is string => typeof t === 'string').slice(0, 8);
+  } catch {
+    return [];
+  }
 }
 
 // Suppress noUnusedLocals warnings for the optional constant.

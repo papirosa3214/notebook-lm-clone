@@ -30,6 +30,13 @@ export const sources = sqliteTable('sources', {
     .default('pending'),
   error: text('error'),
   createdAt: text('created_at').notNull().default(isoNow),
+  // Per-source summary (2-3 sentences) + topics + timestamp.
+  // Populated by `summarizeSource()` after the source reaches status='ready'.
+  // Nullable: legacy rows have no summary; the UI shows "✨ саммаризировать"
+  // until the user (or fire-and-forget ingest) fills these in.
+  summary: text('summary'),
+  summaryTopics: text('summary_topics'), // JSON-encoded string[] — SQLite has no array type
+  summarizedAt: text('summarized_at'),
 });
 
 export const artifacts = sqliteTable('artifacts', {
