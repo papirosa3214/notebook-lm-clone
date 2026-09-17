@@ -165,7 +165,11 @@ export const IngestProgressDeltaSchema = z.discriminatedUnion('type', [
      *  the source row even if the SSE stream dies before sending `done`. */
     sourceId: z.string().optional(),
   }),
-  z.object({ type: z.literal('done'), source: SourceSchema }),
+  // `source` is permissive — single-source ingest endpoints send a Source row,
+  // batch endpoints (e.g. /search-add-batch) send {added: [...]}. Either shape
+  // (or absence) must round-trip or the client sees "stream closed without
+  // done event" because the emitter silently drops mismatched deltas.
+  z.object({ type: z.literal('done'), source: z.unknown().optional() }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type IngestProgressDelta = z.infer<typeof IngestProgressDeltaSchema>;
