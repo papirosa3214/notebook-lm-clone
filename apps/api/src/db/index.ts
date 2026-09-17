@@ -93,6 +93,19 @@ function migrate(sqlite: Database.Database) {
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
       embedding float[1024]
     );
+
+    -- FTS5 (BM25) lexical index. External-content mode so storage isn't
+    -- duplicated; the rowid here is the chunks.id primary key. We index
+    -- title and content for keyword matching, which complements dense
+    -- retrieval on unique terms (URLs, model names, dates) that
+    -- embedding models tend to flatten.
+    CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+      title,
+      content,
+      content='chunks',
+      content_rowid='id',
+      tokenize='unicode61'
+    );
   `);
 
   // One-shot migration from the pre-0.2 Ragflow-era schema.

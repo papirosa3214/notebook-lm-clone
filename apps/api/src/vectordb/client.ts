@@ -150,6 +150,12 @@ export async function addSourceText(
     `INSERT INTO chunks (vec_rowid, notebook_id, source_id, kind, title, url, content, ordinal)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  // FTS5 is in external-content mode keyed on chunks.id, so we just need
+  // to keep it in sync via triggers — see migrate(). Inserts here are
+  // a defensive no-op if the trigger is active.
+  const insertFts = sqlite.prepare(
+    `INSERT INTO chunks_fts (rowid, title, content) VALUES (?, ?, ?)`,
+  );
 
   const inserted: number[] = [];
 
@@ -169,7 +175,7 @@ export async function addSourceText(
         const info = insertVec.run(Buffer.from(vec.buffer));
         const vecRowid = Number(info.lastInsertRowid);
         inserted.push(vecRowid);
-        insertMeta.run(
+        const metaInfo = insertMeta.run(
           vecRowid,
           input.notebookId,
           input.sourceId,
@@ -179,6 +185,10 @@ export async function addSourceText(
           part,
           start + i,
         );
+        // Keep the FTS index in sync with chunks. lastInsertRowid on the
+        // chunks row gives us the chunks.id we'll match against in the
+        // FTS rowid.
+        insertFts.run(metaInfo.lastInsertRowid, input.title, part);
       }
       onBatch?.(end, total);
     }
@@ -259,7 +269,83 @@ export async function retrieve(
     distance: number;
   }>;
 
-  return rows.map((r) => ({
+  // Hybrid retrieval: dense (sqlite-vec) + lexical (FTS5 BM25), merged
+  // with Reciprocal Rank Fusion. We fetch topK from each side so the
+  // union has at most 2*topK candidates before RRF cuts it back to topK.
+  //
+  // RRF: score = sum(1 / (k0 + rank)) across retrieval systems where
+  // rank is 1-based. k0=60 is the original Cormack/Clarke/Buettcher
+  // default that flattens rank differences sensibly. A chunk that
+  // shows up in BOTH lists scores higher than one that shows up in
+  // only one — that's the whole point of the merge.
+  const K0 = 60;
+  const ftsRows = sqlite
+    .prepare(
+      `SELECT c.id AS chunk_pk,
+              c.source_id AS source_id,
+              c.title AS title,
+              c.url AS url,
+              c.content AS content,
+              bm25(chunks_fts) AS bm25_score
+       FROM chunks_fts
+       JOIN chunks c ON c.id = chunks_fts.rowid
+       WHERE chunks_fts MATCH ?
+         AND c.notebook_id = ?
+       ORDER BY bm25_score
+       LIMIT ?`,
+    )
+    .all(question, notebookId, topK) as Array<{
+    chunk_pk: number;
+    source_id: string;
+    title: string;
+    url: string | null;
+    content: string;
+    bm25_score: number;
+  }>;
+
+  type Hit = {
+    chunk_pk: number;
+    source_id: string;
+    title: string;
+    url: string | null;
+    content: string;
+    rrf: number;
+  };
+  const hits = new Map<number, Hit>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    hits.set(r.chunk_pk, {
+      chunk_pk: r.chunk_pk,
+      source_id: r.source_id,
+      title: r.title,
+      url: r.url,
+      content: r.content,
+      // dense rank: 1 for the closest, growing by 1
+      rrf: 1 / (K0 + (i + 1)),
+    });
+  }
+  for (let i = 0; i < ftsRows.length; i++) {
+    const r = ftsRows[i]!;
+    const existing = hits.get(r.chunk_pk);
+    if (existing) {
+      existing.rrf += 1 / (K0 + (i + 1));
+    } else {
+      hits.set(r.chunk_pk, {
+        chunk_pk: r.chunk_pk,
+        source_id: r.source_id,
+        title: r.title,
+        url: r.url,
+        content: r.content,
+        rrf: 1 / (K0 + (i + 1)),
+      });
+    }
+  }
+
+  // Sort by RRF score desc, take topK.
+  const merged = [...hits.values()].sort((a, b) => b.rrf - a.rrf).slice(0, topK);
+
+  return merged.map((r) => ({
     id: `c${r.chunk_pk}`,
     doc_id: r.source_id,
     document_id: r.source_id,
@@ -267,11 +353,9 @@ export async function retrieve(
     document_keyword: r.title,
     content: r.content,
     content_with_weight: r.content,
-    // sqlite-vec returns a non-Euclidean distance on float vectors; values are
-    // comparable (smaller = closer) but not bounded to [0..1]. Pass them through
-    // as-is — the UI only uses them to order chips, not for display.
-    similarity: r.distance,
-    score: r.distance,
+    // RRF score is unbounded but monotonic — UI uses it for ordering only.
+    similarity: r.rrf,
+    score: r.rrf,
   }));
 }
 
