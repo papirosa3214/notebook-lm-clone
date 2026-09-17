@@ -8,7 +8,6 @@ export type SourceStatus = 'pending' | 'parsing' | 'ready' | 'failed';
 export interface Notebook {
   id: string;
   title: string;
-  ragflowDatasetId: string;
   defaultProvider: ProviderId;
   defaultModel: string;
   createdAt: string;
@@ -19,7 +18,6 @@ export interface Notebook {
 export interface Source {
   id: string;
   notebookId: string;
-  ragflowDocId: string | null;
   kind: SourceKind;
   title: string;
   url: string | null;

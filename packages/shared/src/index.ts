@@ -33,7 +33,6 @@ export type CitationChunk = z.infer<typeof CitationChunkSchema>;
 export const NotebookSchema = z.object({
   id: z.string(),
   title: z.string(),
-  ragflowDatasetId: z.string(), // foreign id in Ragflow
   defaultProvider: ProviderIdSchema,
   defaultModel: z.string(),
   createdAt: z.string(),        // ISO
@@ -46,7 +45,6 @@ export type SourceStatus = z.infer<typeof SourceStatusSchema>;
 export const SourceSchema = z.object({
   id: z.string(),
   notebookId: z.string(),
-  ragflowDocId: z.string().nullable(),
   kind: SourceKindSchema,
   title: z.string(),
   url: z.string().nullable(),
