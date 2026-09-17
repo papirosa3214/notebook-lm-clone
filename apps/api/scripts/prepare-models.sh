@@ -53,12 +53,11 @@ else
   warm_model "$EMBEDDING_MODEL" 0 "embed" || true
 fi
 
-# Chat model: coder30b-abl — qwen3 MoE 30.5B/3B active, IQ3_M. Active params
-# per token are ~3B, so Ollama should keep ~1.5 GB of weights in VRAM and the
-# rest of the experts in RAM. Together with bge-m3-embed fp16 (~1.1 GB) and
-# KV cache (capped via num_ctx) this fits a 16 GB GPU. Let Ollama decide
-# layer placement — it will spill cleanly to CPU if VRAM is tight rather
-# than failing to load.
-warm_model "$CHAT_MODEL" 999 "chat" || true
+# Chat model: coder30b-abl — qwen3 MoE 30.5B/3B active, IQ3_M. num_gpu=24
+# pins ~half the layers to GPU (~7-8 GB) and spills the rest to RAM, leaving
+# room for bge-m3-embed on GPU. The actual chat call also pins num_ctx=16384
+# (see providers/ollama.ts) — without that cap the 262k advertised context
+# would allocate ~25 GB of KV cache and tank throughput.
+warm_model "$CHAT_MODEL" 24 "chat" || true
 
 echo "{\"step\":\"done\",\"ollama_url\":\"$OLLAMA_URL\",\"embedding\":\"$EMBEDDING_MODEL\",\"chat\":\"$CHAT_MODEL\",\"keep_alive\":\"$KEEP_ALIVE\"}"
