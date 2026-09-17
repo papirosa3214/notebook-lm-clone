@@ -280,10 +280,13 @@ function MessageBubble({
         <div className="prose-chat rounded-2xl rounded-tl-md border bg-surface px-4 py-3"
           style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}>
           {message.pending && !message.content ? (
-            <span className="inline-flex items-center gap-1.5 text-muted">
-              <Dot delay={0} />
-              <Dot delay={150} />
-              <Dot delay={300} />
+            <span className="inline-flex items-center gap-2 text-sm text-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <Dot delay={0} />
+                <Dot delay={150} />
+                <Dot delay={300} />
+              </span>
+              Загружаю модель…
             </span>
           ) : (
             <AnswerContent

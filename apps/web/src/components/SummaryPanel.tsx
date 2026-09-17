@@ -203,10 +203,13 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
           <div className="space-y-4">
             <div className="prose-summary animate-fade-in">
               {streaming && !content ? (
-                <span className="inline-flex items-center gap-1.5 text-muted">
-                  <Dot delay={0} />
-                  <Dot delay={150} />
-                  <Dot delay={300} />
+                <span className="inline-flex items-center gap-2 text-sm text-muted">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Dot delay={0} />
+                    <Dot delay={150} />
+                    <Dot delay={300} />
+                  </span>
+                  Загружаю модель…
                 </span>
               ) : (
                 renderMarkdownLite(content)

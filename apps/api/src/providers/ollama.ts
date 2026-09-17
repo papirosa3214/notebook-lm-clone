@@ -23,6 +23,10 @@ export class OllamaProvider implements LLMProvider {
       // spends ~25s of internal reasoning before any visible token. See
       // /Users/max/.hermes/memory for the user's rule about this.
       think: false,
+      // Keep the model in VRAM between requests so the next chat/summary
+      // turn isn't a 10-20s cold load from disk. Default Ollama keep_alive
+      // is 5m; bump to 30m so a coffee break doesn't drop the model.
+      keep_alive: '30m',
       options: {
         temperature: req.temperature ?? 0.2,
         num_predict: req.maxTokens ?? 1024,
