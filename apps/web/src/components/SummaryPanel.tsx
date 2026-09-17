@@ -103,6 +103,13 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
             });
           }
         },
+        onAbort: () => {
+          // Newer refresh / Strict-Mode double-mount superseded us — reset
+          // state so the loader stops spinning even though no done/error
+          // event arrived.
+          setStreaming(false);
+          abortRef.current = null;
+        },
         onError: (msg) => {
           setStreaming(false);
           abortRef.current = null;

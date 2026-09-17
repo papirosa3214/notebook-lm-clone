@@ -14,6 +14,12 @@ export interface ChatStreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (messageId: string) => void;
   onError?: (msg: string) => void;
+  /**
+   * Fires when the stream is aborted by us (refresh / unmount / Strict-Mode
+   * double-mount). Distinct from onError so the UI can reset `streaming` and
+   * clear `abortRef` without showing the user a scary "aborted" message.
+   */
+  onAbort?: () => void;
 }
 
 /**
@@ -48,6 +54,12 @@ export interface SummaryStreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (summaryId: string) => void;
   onError?: (msg: string) => void;
+  /**
+   * Fires when the stream is aborted by us (refresh / unmount / Strict-Mode
+   * double-mount). Distinct from onError so the UI can reset `streaming` and
+   * clear `abortRef` without showing the user a scary "aborted" message.
+   */
+  onAbort?: () => void;
 }
 
 export function streamSummary(opts: SummaryStreamOptions, handlers: SummaryStreamHandlers): () => void {
@@ -69,6 +81,7 @@ interface ParsedHandlers {
   onToken?: (text: string) => void;
   onDone?: (id: string) => void;
   onError?: (msg: string) => void;
+  onAbort?: () => void;
 }
 
 /** Internal: shared SSE reader for chat + summary. */
@@ -123,7 +136,14 @@ function openSse(
         }
       }
     } catch (err) {
-      if ((err as { name?: string }).name === 'AbortError') return;
+      if ((err as { name?: string }).name === 'AbortError') {
+        // Abort is not an error from the user's perspective — it just means
+        // a new request superseded this one (Strict-Mode double-mount,
+        // refresh button, notebook switch). Reset state without surfacing
+        // an error message.
+        handlers.onAbort?.();
+        return;
+      }
       handlers.onError?.(err instanceof Error ? err.message : String(err));
     }
   })();

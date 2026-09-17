@@ -93,6 +93,12 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
           setStreaming(false);
           abortRef.current = null;
         },
+        onAbort: () => {
+          // Refresh / Strict-Mode double-mount superseded us — reset state
+          // so the loader stops spinning without surfacing an error.
+          setStreaming(false);
+          abortRef.current = null;
+        },
         onError: (msg) => {
           setStreaming(false);
           abortRef.current = null;
