@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
 import { SourcesPanel } from '../components/SourcesPanel';
 import { ChatPanel } from '../components/ChatPanel';
+import { PanelErrorBoundary } from '../components/ErrorBoundary';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
@@ -173,8 +174,17 @@ export default function NotebookPage() {
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 md:px-6"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <div className="flex min-w-0 items-center gap-3">
-          <Link to="/" className="flex items-center gap-2 text-muted hover:text-ink transition-colors" title="Все ноутбуки">
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-muted transition-colors hover:text-ink"
+            title="Все ноутбуки"
+          >
             <NotebookLogoMark size={28} />
+            <span className="hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium md:inline-flex"
+              style={{ borderColor: 'rgb(var(--nb-border))' }}>
+              <span aria-hidden>←</span>
+              Все ноутбуки
+            </span>
           </Link>
           <div className="min-w-0">
             <h1 className="truncate text-[17px] font-semibold tracking-tight md:text-[19px]">
@@ -263,10 +273,12 @@ export default function NotebookPage() {
 
           <div className={mobileTab === 'overview' ? '' : 'hidden md:block'}>
             {hasReadySources ? (
-              <SummaryPanel
-                notebookId={notebookId}
-                onOpenSource={(chunk, index) => setOpenCitation({ chunk, index })}
-              />
+              <PanelErrorBoundary panel="Краткий обзор">
+                <SummaryPanel
+                  notebookId={notebookId}
+                  onOpenSource={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
             ) : (
               <EmptyCentreState hasAnySources={hasSources} />
             )}
@@ -277,22 +289,26 @@ export default function NotebookPage() {
                 Desktop: card wrapper so the chat has a defined panel boundary. */}
             <div className="hidden md:flex md:min-h-[460px] md:w-full md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:bg-surface md:shadow-soft"
               style={{ borderColor: 'rgb(var(--nb-border))' }}>
-              <ChatPanel
-                notebookId={notebookId}
-                onSaveArtifact={(question, answer, citations) => {
-                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                }}
-                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-              />
+              <PanelErrorBoundary panel="Чат">
+                <ChatPanel
+                  notebookId={notebookId}
+                  onSaveArtifact={(question, answer, citations) => {
+                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                  }}
+                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
             </div>
             <div className="flex w-full flex-1 md:hidden">
-              <ChatPanel
-                notebookId={notebookId}
-                onSaveArtifact={(question, answer, citations) => {
-                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                }}
-                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-              />
+              <PanelErrorBoundary panel="Чат">
+                <ChatPanel
+                  notebookId={notebookId}
+                  onSaveArtifact={(question, answer, citations) => {
+                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                  }}
+                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
             </div>
           </div>
 

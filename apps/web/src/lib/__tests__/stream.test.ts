@@ -21,22 +21,28 @@ afterEach(() => {
  *  IMPORTANT: handlers MUST be attached BEFORE `streamChat(...)` runs — the SSE
  *  IIFE kicks off synchronously and may fire `done`/`error`/`abort` before the
  *  caller's next microtask if we race. */
-function makeHandler<T>(target: Partial<Record<string, (arg: T) => void>>, key: string) {
+function makeHandler<T>(target: Record<string, unknown>, key: string) {
   let resolve!: (arg: T) => void;
   const promise = new Promise<T>((r) => {
     resolve = r;
   });
-  target[key] = ((arg: T) => resolve(arg)) as never;
+  // Cast at the boundary: TS can't prove the runtime value matches the
+  // declared handler type for the specific key — `T` is supplied per call.
+  (target as Record<string, (arg: T) => void>)[key] = (arg: T) => resolve(arg);
   return promise;
 }
 
 /** Build a Response that streams the given SSE blocks back to the reader.
- *  Each block must be terminated by `\n\n` (real Fastify-sse behaviour).
- *  Without that trailing blank line the reader's `buf` holds the final
- *  `data:` line on EOF and the parser silently drops it — masking any test
- *  that depends on a terminal `done` event. */
-function sseResponse(blocks: string[], status = 200): Response {
-  const body = blocks.map((b) => (b.endsWith('\n\n') ? b : b + '\n\n')).join('');
+ *  Pass `trailingNewline: false` to mimic the backend's behaviour of
+ *  omitting the blank line after the final `done` event — the parser
+ *  must still flush the trailing block. */
+function sseResponse(
+  blocks: string[],
+  status = 200,
+  opts: { trailingNewline?: boolean } = {},
+): Response {
+  const sep = opts.trailingNewline === false ? '' : '\n\n';
+  const body = blocks.map((b, i) => (i === blocks.length - 1 ? b : b + '\n\n')).join('') + sep;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(body));
@@ -65,6 +71,31 @@ describe('streamChat — done event', () => {
 
     const id = await done;
     expect(id).toBe('m-1');
+  });
+
+  it('fires onDone even when the server omits the trailing \\n\\n (real backend)', async () => {
+    // Backend reality: the final `data: {"type":"done",...}` event is NOT
+    // followed by a blank line. Without the trailing-flush guard the
+    // event sits in `buf` when EOF arrives and is silently dropped —
+    // which broke SummaryPanel's savePersisted.
+    fetchMock.mockResolvedValueOnce(
+      sseResponse(
+        [
+          'data: {"type":"citations","chunks":[]}',
+          'data: {"type":"token","text":"hi"}',
+          'data: {"type":"done","summaryId":"s-1"}',
+        ],
+        200,
+        { trailingNewline: false },
+      ),
+    );
+
+    const handlers: { onDone?: (id: string) => void } = {};
+    const done = makeHandler<string>(handlers, 'onDone');
+    streamSummary({ notebookId: 'n1' }, handlers);
+
+    const id = await done;
+    expect(id).toBe('s-1');
   });
 });
 

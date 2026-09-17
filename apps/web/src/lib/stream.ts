@@ -110,30 +110,51 @@ function openSse(
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      /** Dispatch a parsed SSE event. */
+      const dispatch = (json: string) => {
+        if (!json) return;
+        try {
+          const delta = JSON.parse(json) as ChatDelta | SummaryDelta;
+          if (delta.type === 'citations') handlers.onCitations?.(delta.chunks);
+          else if (delta.type === 'token') handlers.onToken?.(delta.text);
+          else if (delta.type === 'done') {
+            const id = 'messageId' in delta ? delta.messageId : delta.summaryId;
+            handlers.onDone?.(id);
+          } else if (delta.type === 'error') handlers.onError?.(delta.message);
+        } catch {
+          // ignore malformed chunk
+        }
+      };
+      /** Try to flush one complete `\n\n`-terminated block from `buf`. */
+      const flushBlock = (): boolean => {
+        const nl = buf.indexOf('\n\n');
+        if (nl === -1) return false;
+        const block = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        const line = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) return true;
+        dispatch(line.slice(5).trim());
+        return true;
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf('\n\n')) !== -1) {
-          const block = buf.slice(0, nl);
-          buf = buf.slice(nl + 2);
-          const line = block.split('\n').find((l) => l.startsWith('data:'));
-          if (!line) continue;
-          const json = line.slice(5).trim();
-          if (!json) continue;
-          try {
-            const delta = JSON.parse(json) as ChatDelta | SummaryDelta;
-            if (delta.type === 'citations') handlers.onCitations?.(delta.chunks);
-            else if (delta.type === 'token') handlers.onToken?.(delta.text);
-            else if (delta.type === 'done') {
-              const id = 'messageId' in delta ? delta.messageId : delta.summaryId;
-              handlers.onDone?.(id);
-            } else if (delta.type === 'error') handlers.onError?.(delta.message);
-          } catch {
-            // ignore malformed chunk
-          }
+        while (flushBlock()) {
+          /* drain all complete blocks */
         }
+      }
+      // Server closed the stream. If `buf` has anything left over (no
+      // trailing `\n\n`), treat it as one final block. This is the common
+      // case for our backend which omits the blank line after `done`.
+      // Without this, the terminal event silently disappears and any
+      // `onDone`/`onError` handler in the panel never fires — so things
+      // like `savePersisted` (SummaryPanel) never run.
+      const trailing = buf.trim();
+      if (trailing) {
+        buf = '';
+        const line = trailing.split('\n').find((l) => l.startsWith('data:'));
+        if (line) dispatch(line.slice(5).trim());
       }
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
