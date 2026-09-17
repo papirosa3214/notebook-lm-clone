@@ -3,7 +3,7 @@ import type { ChatStreamEvent, LLMProvider, ProviderChatRequest } from '@noteboo
 
 export class OllamaProvider implements LLMProvider {
   readonly id = 'ollama' as const;
-  readonly defaultModel = 'qwen3.6-27b-iq4-16k:latest';
+  readonly defaultModel = 'coder30b-abl:latest';
 
   async listModels(): Promise<string[]> {
     const res = await fetch(`${config.OLLAMA_BASE_URL}/api/tags`);
