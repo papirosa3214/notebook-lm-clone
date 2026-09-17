@@ -53,11 +53,11 @@ else
   warm_model "$EMBEDDING_MODEL" 0 "embed" || true
 fi
 
-# Chat model: coder30b-abl — qwen3 MoE 30.5B/3B active, IQ3_M. num_gpu=24
-# pins ~half the layers to GPU (~7-8 GB) and spills the rest to RAM, leaving
-# room for bge-m3-embed on GPU. The actual chat call also pins num_ctx=16384
-# (see providers/ollama.ts) — without that cap the 262k advertised context
-# would allocate ~25 GB of KV cache and tank throughput.
-warm_model "$CHAT_MODEL" 24 "chat" || true
+# Chat model: coder30b-abl — qwen3 MoE 30.5B/3B active, IQ3_M. The systemd
+# unit already enforces KV Q4 (~0.38 GB for 16k context) so the full model
+# (~13 GB weights) plus bge-m3-embed (~0.88 GB) fits comfortably on the
+# 16 GB GPU. num_gpu=999 keeps every layer on GPU; num_ctx is capped to
+# 16384 inside providers/ollama.ts.
+warm_model "$CHAT_MODEL" 999 "chat" || true
 
 echo "{\"step\":\"done\",\"ollama_url\":\"$OLLAMA_URL\",\"embedding\":\"$EMBEDDING_MODEL\",\"chat\":\"$CHAT_MODEL\",\"keep_alive\":\"$KEEP_ALIVE\"}"
