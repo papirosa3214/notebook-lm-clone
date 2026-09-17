@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { streamChat } from '../lib/stream';
 import type { ChatMessage, CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
+import { SummaryCard } from './SummaryCard';
 import {
   SendIcon,
   StopIcon,
@@ -32,6 +33,16 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
       return r as { id: string; defaultProvider: string; defaultModel: string };
     },
   });
+
+  // Sources are needed to drive the pinned SummaryCard — it counts
+  // ready sources and shows the overview when at least one is ready.
+  // Shares the cache key with SourcesPanel and SummaryPanel.
+  const sources = useQuery({
+    queryKey: ['sources', notebookId],
+    queryFn: () => api.listSources(notebookId),
+  });
+  const readyCount =
+    sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
 
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('qwen3.6-27b-iq4-16k:latest');
@@ -162,6 +173,16 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
 
       {/* ---- Messages ---- */}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+        {/* Pinned summary card — the cached notebook summary is rendered
+            as the first message so the user sees the overview before any
+            chat turns. Inline [N] citations are clickable. */}
+        {readyCount > 0 && (
+          <SummaryCard
+            notebookId={notebookId}
+            readyCount={readyCount}
+            onOpenCitation={onOpenCitation}
+          />
+        )}
         {messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-md text-center">

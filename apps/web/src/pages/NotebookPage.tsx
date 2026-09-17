@@ -52,7 +52,11 @@ const DEFAULT_LAYOUT: LayoutState = {
   sourcesWidth: 300,
   notesWidth: 320,
   sourcesCollapsed: false,
-  notesCollapsed: false,
+  // Notes (artifacts) are hidden by default — the summary lives in the
+  // chat panel as a pinned first message, and artifact creation flows
+  // through the chat's "сохранить в заметки" button. Users who want
+  // a dedicated notes panel can open it from the right rail.
+  notesCollapsed: true,
 };
 
 const LAYOUT_KEY = 'nb.layout';
@@ -264,14 +268,17 @@ export default function NotebookPage() {
         </div>
 
         {/* CENTER */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-3 md:gap-5 md:p-6">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 md:gap-5 md:p-6">
           <div className={mobileTab === 'sources' ? '' : 'hidden'}>
             <div className="card overflow-hidden">
               <SourcesPanel notebookId={notebookId} />
             </div>
           </div>
 
-          <div className={mobileTab === 'overview' ? '' : 'hidden md:block'}>
+          {/* Mobile-only overview tab. Desktop renders the summary inside
+              ChatPanel as a pinned first message (see SummaryCard) so the
+              central column stays a single scrolling conversation. */}
+          <div className={mobileTab === 'overview' ? '' : 'hidden md:hidden'}>
             {hasReadySources ? (
               <PanelErrorBoundary panel="Краткий обзор">
                 <SummaryPanel
