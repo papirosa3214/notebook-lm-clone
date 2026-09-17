@@ -163,6 +163,9 @@ export const IngestProgressDeltaSchema = z.discriminatedUnion('type', [
     /** 0..1 for the current stage (1 = complete). For stages with sub-steps (embedding N chunks), the value updates per chunk. */
     ratio: z.number().min(0).max(1).optional(),
     message: z.string().optional(),
+    /** Set on the first event of an ingest so the client can recover by polling
+     *  the source row even if the SSE stream dies before sending `done`. */
+    sourceId: z.string().optional(),
   }),
   z.object({ type: z.literal('done'), source: SourceSchema }),
   z.object({ type: z.literal('error'), message: z.string() }),

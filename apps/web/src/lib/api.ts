@@ -52,6 +52,7 @@ export const api = {
     return openIngestStream(
       `/api/notebooks/${notebookId}/sources/url?stream=1`,
       body,
+      notebookId,
       onProgress,
     );
   },
@@ -63,6 +64,7 @@ export const api = {
     return openIngestStream(
       `/api/notebooks/${notebookId}/sources/youtube?stream=1`,
       body,
+      notebookId,
       onProgress,
     );
   },
@@ -74,6 +76,7 @@ export const api = {
     return openIngestStream(
       `/api/notebooks/${notebookId}/search-add-batch?stream=1`,
       body,
+      notebookId,
       onProgress,
     );
   },
@@ -170,6 +173,7 @@ export type { ChatDelta };
 function openIngestStream<T>(
   url: string,
   body: unknown,
+  notebookId: string,
   onProgress?: (delta: IngestProgressDelta) => void,
 ): { promise: Promise<T>; abort: () => void } {
   const controller = new AbortController();
@@ -188,6 +192,7 @@ function openIngestStream<T>(
     const decoder = new TextDecoder();
     let buf = '';
     let finalSource: T | undefined;
+    let sourceId: string | undefined;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -202,13 +207,41 @@ function openIngestStream<T>(
         if (!json) continue;
         try {
           const delta = JSON.parse(json) as IngestProgressDelta;
-          if (delta.type === 'progress') onProgress?.(delta);
-          else if (delta.type === 'done') finalSource = delta.source as T;
-          else if (delta.type === 'error') throw new Error(delta.message);
+          if (delta.type === 'progress') {
+            // Capture sourceId from the first event so we can recover if the
+            // SSE stream dies before sending `done` (e.g. idle timeout during
+            // a slow Ollama embedding pass).
+            if (delta.sourceId && !sourceId) sourceId = delta.sourceId;
+            onProgress?.(delta);
+          } else if (delta.type === 'done') {
+            finalSource = delta.source as T;
+          } else if (delta.type === 'error') {
+            throw new Error(delta.message);
+          }
         } catch (err) {
           if (err instanceof Error) throw err;
           // ignore malformed chunk
         }
+      }
+    }
+    if (!finalSource && sourceId) {
+      // Stream died before `done` — recover by polling the source's actual state.
+      try {
+        const fetched = await http<unknown>(
+          `/api/notebooks/${notebookId}/sources/${sourceId}`,
+        );
+        // Only treat as the expected response if it looks like a Source row;
+        // batch endpoints return a different shape and we should not lie.
+        if (
+          typeof fetched === 'object' &&
+          fetched !== null &&
+          'id' in fetched &&
+          'status' in fetched
+        ) {
+          return fetched as T;
+        }
+      } catch {
+        // Fall through to the original error below.
       }
     }
     if (!finalSource) throw new Error('stream closed without done event');

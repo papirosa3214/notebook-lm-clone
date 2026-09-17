@@ -15,12 +15,14 @@ export class VectorDbError extends Error {
 
 // =========== Embeddings =========
 
-/** Call Ollama embeddings API. */
+/** Call Ollama embeddings API. Times out at 60 s — Ollama stalls long enough
+ *  and the SSE ingest stream is going to die anyway, so fail fast. */
 export async function embed(text: string): Promise<Float32Array> {
   const res = await fetch(`${config.EMBEDDING_BASE_URL}/api/embeddings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: config.EMBEDDING_MODEL, prompt: text }),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     throw new VectorDbError(res.status, `embed failed: ${await res.text()}`);
@@ -118,8 +120,16 @@ export interface AddSourceInput {
  *
  * If any chunk's embed call fails, we delete everything we already inserted
  * for this source so the caller can mark the source 'failed' cleanly.
+ *
+ * `onBatch(done, total)` fires after each successful batch — the API uses it
+ * to push per-chunk progress to the SSE stream so the client sees movement
+ * during the long embedding pass (otherwise the stream appears idle and a
+ * proxy can drop it on idle timeout).
  */
-export async function addSourceText(input: AddSourceInput): Promise<number> {
+export async function addSourceText(
+  input: AddSourceInput,
+  onBatch?: (done: number, total: number) => void,
+): Promise<number> {
   const sqlite = getRawSqlite();
   const parts = chunkText(input.content);
   if (parts.length === 0) {
@@ -139,8 +149,9 @@ export async function addSourceText(input: AddSourceInput): Promise<number> {
     // request and takes ~1.5s; doing 8 in parallel keeps the GPU saturated
     // without overwhelming the model server.
     const CONCURRENCY = 8;
-    for (let start = 0; start < parts.length; start += CONCURRENCY) {
-      const end = Math.min(start + CONCURRENCY, parts.length);
+    const total = parts.length;
+    for (let start = 0; start < total; start += CONCURRENCY) {
+      const end = Math.min(start + CONCURRENCY, total);
       const slice = parts.slice(start, end);
       const vecs = await Promise.all(slice.map((p) => embed(p)));
       for (let i = 0; i < slice.length; i++) {
@@ -160,6 +171,7 @@ export async function addSourceText(input: AddSourceInput): Promise<number> {
           start + i,
         );
       }
+      onBatch?.(end, total);
     }
   } catch (err) {
     if (inserted.length > 0) {

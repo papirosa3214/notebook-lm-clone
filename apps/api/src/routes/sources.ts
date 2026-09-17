@@ -9,6 +9,7 @@ import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
 import { addSourceText, removeSource } from '../vectordb/client.js';
 import { runIngest } from '../lib/ingestRun.js';
+import { autoPrepareEmbedding, autoReleaseEmbedding } from '../embedding/lifecycle.js';
 
 const AddUrlBody = z.object({
   url: z.string().url(),
@@ -68,31 +69,40 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         reply,
         wantsStream: wantsStream(req),
         ingest: async (emit) => {
+          await autoPrepareEmbedding();
           try {
-            emit.progress('fetching', 0.1, `Загружаю ${new URL(url).hostname}…`);
+            emit.progress('fetching', 0.1, `Загружаю ${new URL(url).hostname}…`, localId);
             const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
 
-            emit.progress('chunking', 0.3, 'Разбиваю на чанки…');
-            // addSourceText emits per-chunk progress via a wrapper around it:
             const finalTitle = title ?? fetchedTitle;
             db.update(sources)
               .set({ title: finalTitle })
               .where(eq(sources.id, localId))
               .run();
 
-            // We rely on the embedding step being observable through addSourceText;
-            // since we have it as a single call, report 'embedding' as one stage.
-            emit.progress('embedding', 0.5, 'Создаю embeddings…');
-            await addSourceText({
-              notebookId: req.params.id,
-              sourceId: localId,
-              kind: 'url',
-              title: finalTitle,
-              url,
-              content: markdown,
-            });
+            emit.progress('embedding', 0.5, 'Создаю embeddings…', localId);
+            await addSourceText(
+              {
+                notebookId: req.params.id,
+                sourceId: localId,
+                kind: 'url',
+                title: finalTitle,
+                url,
+                content: markdown,
+              },
+              (done, total) => {
+                // Per-batch progress so the SSE stream stays alive during the
+                // long embedding pass (otherwise idle timeout can drop it).
+                emit.progress(
+                  'embedding',
+                  0.5 + (done / total) * 0.4,
+                  `Эмбеддинг: ${done}/${total} чанков`,
+                  localId,
+                );
+              },
+            );
 
-            emit.progress('storing', 0.95, 'Сохраняю…');
+            emit.progress('storing', 0.95, 'Сохраняю…', localId);
             db.update(sources)
               .set({ status: 'ready' })
               .where(eq(sources.id, localId))
@@ -108,6 +118,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .where(eq(sources.id, localId))
               .run();
             throw err;
+          } finally {
+            await autoReleaseEmbedding();
           }
         },
       });
@@ -242,19 +254,30 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         reply,
         wantsStream: wantsStream(req),
         ingest: async (emit) => {
+          await autoPrepareEmbedding();
           try {
-            emit.progress('fetching', 0.1, 'Загружаю субтитры…');
+            emit.progress('fetching', 0.1, 'Загружаю субтитры…', localId);
             const { text, title: fetchedTitle } = await fetchYouTubeTranscript(parsed.data.url);
-            emit.progress('embedding', 0.5, 'Создаю embeddings…');
-            await addSourceText({
-              notebookId: req.params.id,
-              sourceId: localId,
-              kind: 'youtube',
-              title: parsed.data.title ?? fetchedTitle,
-              url: parsed.data.url,
-              content: text,
-            });
-            emit.progress('storing', 0.95, 'Сохраняю…');
+            emit.progress('embedding', 0.5, 'Создаю embeddings…', localId);
+            await addSourceText(
+              {
+                notebookId: req.params.id,
+                sourceId: localId,
+                kind: 'youtube',
+                title: parsed.data.title ?? fetchedTitle,
+                url: parsed.data.url,
+                content: text,
+              },
+              (done, total) => {
+                emit.progress(
+                  'embedding',
+                  0.5 + (done / total) * 0.4,
+                  `Эмбеддинг: ${done}/${total} чанков`,
+                  localId,
+                );
+              },
+            );
+            emit.progress('storing', 0.95, 'Сохраняю…', localId);
             db.update(sources)
               .set({ title: parsed.data.title ?? fetchedTitle, status: 'ready' })
               .where(eq(sources.id, localId))
@@ -269,6 +292,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .where(eq(sources.id, localId))
               .run();
             throw err;
+          } finally {
+            await autoReleaseEmbedding();
           }
         },
       });

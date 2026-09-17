@@ -98,6 +98,10 @@ export type IngestProgressDelta =
       stage: IngestStage;
       ratio?: number;
       message?: string;
+      /** Sent from the first progress event so the client can recover when
+       *  the SSE stream dies before `done` (e.g. idle timeout during slow
+       *  Ollama embedding). */
+      sourceId?: string;
     }
   | { type: 'done'; source: Source }
   | { type: 'error'; message: string };
