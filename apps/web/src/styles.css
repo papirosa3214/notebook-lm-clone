@@ -2,150 +2,329 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =========================================================================
+   NotebookLM-style design tokens
+   Light: cream canvas, terracotta accent, deep-indigo AI surface.
+   Dark: muted graphite canvas, warm clay accent, same indigo surface.
+   ========================================================================= */
 @layer base {
   :root {
-    /* Warm NotebookLM-style accents: amber primary, indigo highlight. */
-    --accent: #d97706;       /* amber-600 */
-    --accent-soft: #fff7ed;  /* amber-50 */
-    --accent-strong: #b45309;
-    --accent-ink: #92400e;   /* amber-800 */
-    --highlight: #e0e7ff;    /* indigo-100 */
-    --highlight-ink: #4338ca;/* indigo-700 */
+    /* Surface scale — warm cream */
+    --nb-canvas: 244 240 232;          /* #F4F0E8 — main background */
+    --nb-surface: 255 255 255;         /* #FFFFFF — cards */
+    --nb-surface-tint: 250 247 240;    /* #FAF7F0 — hover/inset */
+    --nb-border: 224 216 200;          /* #E0D8C8 — borders */
+    --nb-ink: 32 33 36;                /* #202124 — primary text */
+    --nb-muted: 95 99 104;             /* #5F6368 — secondary text */
+    --nb-subtle: 128 131 137;          /* #808389 — tertiary text */
+
+    /* Accent — terracotta clay */
+    --nb-accent: 217 119 87;           /* #D97757 — primary buttons, badges */
+    --nb-accent-hover: 196 99 71;      /* #C46347 — hover */
+    --nb-accent-soft: 253 237 226;     /* #FDEDE2 — soft backgrounds */
+    --nb-accent-ink: 156 73 53;        /* #9C4935 — accent text */
+
+    /* AI Studio gradient — deep indigo */
+    --nb-ai: 58 47 138;                /* #3A2F8A — Studio card base */
+    --nb-ai-ink: 255 255 255;
+    --nb-ai-glow: 145 124 245;         /* #917CF5 — sparkle / highlight */
   }
   html {
-    @apply bg-zinc-50 text-zinc-900;
+    @apply bg-canvas text-ink;
   }
   html.dark {
-    --accent: #fbbf24;        /* amber-400 — softer on dark */
-    --accent-soft: #422006;
-    --accent-strong: #f59e0b;
-    --accent-ink: #fde68a;
-    --highlight: #312e81;
-    --highlight-ink: #c7d2fe;
-    @apply bg-zinc-950 text-zinc-100;
+    --nb-canvas: 25 27 30;             /* #191B1E — graphite canvas */
+    --nb-surface: 39 42 46;            /* #272A2E — cards */
+    --nb-surface-tint: 48 51 56;       /* #303338 — hover */
+    --nb-border: 56 60 65;             /* #383C41 — borders */
+    --nb-ink: 232 234 237;             /* #E8EAED — primary */
+    --nb-muted: 170 175 182;           /* #AAAFB6 — secondary */
+    --nb-subtle: 137 142 149;          /* #898E95 — tertiary */
+
+    --nb-accent: 232 145 110;          /* softer terracotta on dark */
+    --nb-accent-hover: 244 165 134;
+    --nb-accent-soft: 60 38 30;        /* dark warm tint */
+    --nb-accent-ink: 248 195 167;
+
+    --nb-ai: 73 60 154;                /* slightly brighter indigo */
+    --nb-ai-ink: 255 255 255;
+    --nb-ai-glow: 168 152 245;
+    @apply bg-canvas text-ink;
   }
   body {
-    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Google Sans', 'Google Sans Text', -apple-system,
+      BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+      sans-serif;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.005em;
+  }
+  /* Smoother scrollbars */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--nb-border));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--nb-subtle));
+    background-clip: padding-box;
+    border: 2px solid transparent;
   }
 }
 
+/* =========================================================================
+   Components
+   ========================================================================= */
 @layer components {
+  /* ---- Buttons ----------------------------------------------------- */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5
-           text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2
+           text-sm font-medium transition-all
+           disabled:opacity-50 disabled:cursor-not-allowed
+           active:scale-[0.98];
   }
   .btn-primary {
-    @apply text-white shadow-sm;
-    background-color: var(--accent);
+    background-color: rgb(var(--nb-accent));
+    color: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
   }
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--accent-strong);
+    background-color: rgb(var(--nb-accent-hover));
   }
   .btn-secondary {
-    @apply bg-white text-zinc-900 border border-zinc-300 hover:bg-zinc-100;
+    background-color: rgb(var(--nb-surface));
+    color: rgb(var(--nb-ink));
+    border: 1px solid rgb(var(--nb-border));
   }
-  .dark .btn-secondary {
-    @apply bg-zinc-800 text-zinc-100 border-zinc-700 hover:bg-zinc-700;
+  .btn-secondary:hover:not(:disabled) {
+    background-color: rgb(var(--nb-surface-tint));
   }
   .btn-ghost {
-    @apply text-zinc-700 hover:bg-zinc-100;
+    color: rgb(var(--nb-muted));
   }
-  .dark .btn-ghost {
-    @apply text-zinc-300 hover:bg-zinc-800;
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgb(var(--nb-surface-tint));
+    color: rgb(var(--nb-ink));
   }
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-full
+           text-muted transition-all active:scale-95;
+  }
+  .btn-icon:hover:not(:disabled) {
+    background-color: rgb(var(--nb-surface-tint));
+    color: rgb(var(--nb-ink));
+  }
+
+  /* ---- Inputs ------------------------------------------------------ */
   .input {
-    @apply block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm
-           placeholder-zinc-400 transition-colors
-           focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/30;
+    @apply block w-full rounded-xl border bg-surface px-3.5 py-2.5 text-sm
+           placeholder-subtle transition-colors;
+    border-color: rgb(var(--nb-border));
+    color: rgb(var(--nb-ink));
   }
-  .dark .input {
-    @apply border-zinc-700 bg-zinc-900 text-zinc-100 placeholder-zinc-500;
+  .input:focus {
+    outline: none;
+    border-color: rgb(var(--nb-accent));
+    box-shadow: 0 0 0 3px rgb(var(--nb-accent) / 0.18);
   }
+  .textarea {
+    @apply input min-h-0 resize-none;
+  }
+
+  /* ---- Cards ------------------------------------------------------- */
   .card {
-    @apply rounded-xl border border-zinc-200 bg-white;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+    background-color: rgb(var(--nb-surface));
+    border: 1px solid rgb(var(--nb-border));
+    border-radius: 1rem; /* rounded-2xl */
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
   }
-  .dark .card {
-    @apply border-zinc-800 bg-zinc-900;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
+  .card-soft {
+    background-color: rgb(var(--nb-surface-tint));
+    border: 1px solid rgb(var(--nb-border));
+    border-radius: 1rem;
   }
-  .card-accent {
-    @apply rounded-xl border;
-    border-color: var(--accent);
-    background-color: var(--accent-soft);
+  .card-pop {
+    @apply card;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.05),
+      0 8px 24px rgb(0 0 0 / 0.06);
   }
-  .dark .card-accent {
-    border-color: var(--accent);
-    color: var(--accent-ink);
+
+  /* ---- Studio / AI surface ---------------------------------------- */
+  .ai-surface {
+    background:
+      radial-gradient(
+        120% 80% at 100% 0%,
+        rgb(var(--nb-ai-glow) / 0.55) 0%,
+        transparent 55%
+      ),
+      linear-gradient(
+        135deg,
+        rgb(var(--nb-ai)) 0%,
+        rgb(46 38 117) 100%
+      );
+    color: rgb(var(--nb-ai-ink));
+    border-radius: 1.25rem;
+    box-shadow:
+      0 8px 24px rgb(58 47 138 / 0.20),
+      0 2px 6px rgb(58 47 138 / 0.10),
+      inset 0 1px 0 rgb(255 255 255 / 0.08);
+    position: relative;
+    overflow: hidden;
   }
+  .ai-surface::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(
+        circle at 0% 100%,
+        rgb(168 152 245 / 0.30) 0%,
+        transparent 50%
+      );
+    pointer-events: none;
+  }
+
+  /* ---- Source pills ------------------------------------------------ */
+  .source-pill {
+    @apply flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-all;
+    background-color: rgb(var(--nb-surface));
+    border: 1px solid rgb(var(--nb-border));
+  }
+  .source-pill:hover {
+    background-color: rgb(var(--nb-surface-tint));
+    border-color: rgb(var(--nb-accent) / 0.5);
+  }
+
+  /* ---- Chips / citations ------------------------------------------ */
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
-    background-color: var(--accent-soft);
-    color: var(--accent-ink);
-  }
-  .dark .chip {
-    background-color: rgba(251, 191, 36, 0.15);
-    color: var(--accent);
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium;
+    background-color: rgb(var(--nb-accent-soft));
+    color: rgb(var(--nb-accent-ink));
   }
   .chip-indigo {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
-    background-color: var(--highlight);
-    color: var(--highlight-ink);
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+    background-color: rgb(var(--nb-ai-glow) / 0.18);
+    color: rgb(95 75 200);
   }
-  .dark .chip-indigo {
-    background-color: rgba(67, 56, 202, 0.25);
-    color: var(--highlight-ink);
+  html.dark .chip-indigo {
+    color: rgb(195 180 255);
+    background-color: rgb(var(--nb-ai-glow) / 0.22);
   }
-  /* Source type icon pill */
   .kind-pill {
-    @apply inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px];
-    background-color: var(--accent-soft);
-    color: var(--accent-ink);
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm;
+    background-color: rgb(var(--nb-accent-soft));
+    color: rgb(var(--nb-accent));
   }
-  .dark .kind-pill {
-    background-color: rgba(251, 191, 36, 0.15);
-    color: var(--accent);
+
+  /* ---- Section headers -------------------------------------------- */
+  .section-label {
+    @apply px-1 text-[11px] font-semibold uppercase tracking-[0.08em];
+    color: rgb(var(--nb-subtle));
+  }
+
+  /* ---- Empty state ------------------------------------------------- */
+  .empty-card {
+    @apply card flex flex-col items-center gap-2 px-6 py-8 text-center;
+    background-color: rgb(var(--nb-surface-tint) / 0.6);
+  }
+
+  /* ---- Backdrop / modal ------------------------------------------- */
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    background-color: rgb(32 33 36 / 0.45);
+    backdrop-filter: blur(4px);
   }
 }
 
+/* =========================================================================
+   Utilities
+   ========================================================================= */
 @layer utilities {
   .scroll-fade-mask {
     mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent);
-    -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      black calc(100% - 32px),
+      transparent
+    );
   }
   .animate-fade-in {
-    animation: fade-in 0.25s ease-out;
+    animation: fade-up 240ms ease-out;
   }
-  @keyframes fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
+
+  /* Shimmer for streaming placeholders */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--nb-surface-tint)) 0%,
+      rgb(var(--nb-border) / 0.6) 50%,
+      rgb(var(--nb-surface-tint)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+
+  /* NotebookLM-style prose for summary */
   .prose-summary {
-    @apply text-sm leading-relaxed text-zinc-800;
-  }
-  .dark .prose-summary {
-    @apply text-zinc-200;
+    @apply text-[15px] leading-relaxed;
+    color: rgb(var(--nb-ink));
   }
   .prose-summary h2 {
-    @apply mt-3 mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-500;
+    @apply mt-4 mb-1 text-base font-semibold;
+    color: rgb(var(--nb-ink));
   }
   .prose-summary h2:first-child {
     @apply mt-0;
   }
-  .dark .prose-summary h2 {
-    @apply text-zinc-400;
-  }
   .prose-summary p {
-    @apply mb-2;
+    @apply mb-3;
+  }
+  .prose-summary p:last-child {
+    @apply mb-0;
   }
   .prose-summary ul {
-    @apply mb-2 list-disc pl-5 space-y-1;
+    @apply mb-3 list-disc pl-5 space-y-1.5;
   }
   .prose-summary strong {
-    color: var(--accent-ink);
+    @apply font-semibold;
+    color: rgb(var(--nb-accent-ink));
   }
-  .dark .prose-summary strong {
-    color: var(--accent);
+
+  /* Chat bubble prose */
+  .prose-chat {
+    @apply text-[15px] leading-relaxed;
+    color: rgb(var(--nb-ink));
+  }
+  .prose-chat p {
+    @apply mb-2.5;
+  }
+  .prose-chat p:last-child {
+    @apply mb-0;
+  }
+  .prose-chat ul {
+    @apply mb-2.5 list-disc pl-5 space-y-1.5;
+  }
+  .prose-chat h3 {
+    @apply mt-3 mb-1 text-sm font-semibold uppercase tracking-wide;
+    color: rgb(var(--nb-muted));
+  }
+  .prose-chat h3:first-child {
+    @apply mt-0;
   }
 }

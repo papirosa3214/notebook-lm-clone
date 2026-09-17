@@ -3,6 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamSummary } from '../lib/stream';
 import type { CitationChunk } from '../lib/types';
+import {
+  SparkleIcon,
+  RefreshIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  NotebookLogoMark,
+} from './icons/NotebookLogo';
 
 interface Props {
   notebookId: string;
@@ -37,7 +44,6 @@ function savePersisted(id: string, data: Persisted) {
 }
 
 export function SummaryPanel({ notebookId, onOpenSource }: Props) {
-  const [open, setOpen] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const [content, setContent] = useState('');
   const [citations, setCitations] = useState<CitationChunk[]>([]);
@@ -121,94 +127,110 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
   const empty = !streaming && content.length === 0 && !error;
 
   return (
-    <div className="card overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
-        aria-expanded={open}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-base" aria-hidden>✨</span>
-          <span className="text-sm font-semibold">Обзор ноутбука</span>
-          {streaming && (
-            <span className="chip-indigo animate-pulse" title="Генерация">
-              генерируется…
-            </span>
-          )}
-          {!streaming && content && (
-            <span className="text-xs text-zinc-500">
-              {readyCount > 0 ? `${readyCount} источник${ruPlural(readyCount)}` : ''}
-            </span>
+    <div className="ai-surface relative p-6 md:p-7">
+      {/* Decorative sparkles */}
+      <SparkleIcon
+        size={18}
+        className="absolute right-5 top-5 text-white/50 animate-sparkle"
+      />
+      <SparkleIcon
+        size={10}
+        className="absolute right-12 top-12 text-white/30"
+      />
+
+      <div className="relative z-10 mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
+          <NotebookLogoMark size={22} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-[15px] font-semibold tracking-tight text-white">
+              Краткий обзор
+            </h2>
+            {streaming && (
+              <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white">
+                генерируется…
+              </span>
+            )}
+          </div>
+          {!streaming && content && readyCount > 0 && (
+            <p className="text-xs text-white/70">
+              по {readyCount} источник{ruPlural(readyCount)}
+            </p>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!streaming) refresh();
-            }}
+            onClick={() => !streaming && refresh()}
             disabled={streaming}
-            className="btn btn-ghost text-xs"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white transition-all hover:bg-white/20 disabled:opacity-40"
             title="Обновить обзор"
           >
-            ↻ Обновить
+            <RefreshIcon size={13} className={streaming ? 'animate-spin' : ''} />
           </button>
-          <span className="text-zinc-400">{open ? '▾' : '▸'}</span>
         </div>
-      </button>
+      </div>
 
-      {open && (
-        <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          {empty && (
-            <div className="space-y-2">
-              <p className="text-sm text-zinc-500">
-                {readyCount === 0
-                  ? 'Добавьте хотя бы один источник — обзор появится автоматически.'
-                  : 'Обзор ещё не сгенерирован.'}
-              </p>
-              {readyCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => refresh()}
-                  className="btn btn-primary text-xs"
-                >
-                  Сгенерировать обзор
-                </button>
+      {/* Content area — use a white rounded card inside the AI surface */}
+      <div className="relative z-10 rounded-2xl bg-surface p-5 text-ink shadow-soft">
+        {empty && (
+          <div className="space-y-2 py-2">
+            <p className="text-sm text-muted">
+              {readyCount === 0
+                ? 'Добавьте хотя бы один источник — обзор появится автоматически.'
+                : 'Обзор ещё не сгенерирован.'}
+            </p>
+            {readyCount > 0 && (
+              <button
+                type="button"
+                onClick={() => refresh()}
+                className="btn btn-primary mt-2 text-xs"
+              >
+                <SparkleIcon size={12} />
+                Сгенерировать обзор
+              </button>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <p className="text-xs text-red-600">Ошибка: {error}</p>
+        )}
+
+        {(streaming || content) && (
+          <div className="space-y-4">
+            <div className="prose-summary animate-fade-in">
+              {streaming && !content ? (
+                <span className="inline-flex items-center gap-1.5 text-muted">
+                  <Dot delay={0} />
+                  <Dot delay={150} />
+                  <Dot delay={300} />
+                </span>
+              ) : (
+                renderMarkdownLite(content)
               )}
             </div>
-          )}
 
-          {error && (
-            <p className="text-xs text-red-600">Ошибка: {error}</p>
-          )}
-
-          {(streaming || content) && (
-            <div className="space-y-3">
-              <div className="prose-summary animate-fade-in">
-                {renderMarkdownLite(content || (streaming ? '⏳' : ''))}
+            {citations.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 border-t pt-3"
+                style={{ borderColor: 'rgb(var(--nb-border))' }}>
+                {citations.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => onOpenSource?.(c)}
+                    className="chip-indigo cursor-pointer transition-all hover:brightness-95"
+                    title={c.text}
+                  >
+                    [{i + 1}] {c.sourceTitle}
+                  </button>
+                ))}
               </div>
-
-              {citations.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {citations.map((c, i) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => onOpenSource?.(c)}
-                      className="chip-indigo cursor-pointer hover:brightness-95"
-                      title={c.text}
-                    >
-                      [{i + 1}] {c.sourceTitle}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -220,6 +242,17 @@ function ruPlural(n: number): string {
   if (last === 1) return '';
   if (last >= 2 && last <= 4) return 'а';
   return 'ов';
+}
+
+function Dot({ delay }: { delay: number }) {
+  return (
+    <span
+      className="h-1.5 w-1.5 rounded-full bg-subtle"
+      style={{
+        animation: `dot-pulse 1.4s ${delay}ms ease-in-out infinite`,
+      }}
+    />
+  );
 }
 
 /**
@@ -275,7 +308,7 @@ function renderInline(text: string): React.ReactNode {
     const boldMatch = text.slice(i).match(/^\*\*([^*]+)\*\*/);
     if (citeMatch) {
       parts.push(
-        <span key={`c-${key++}`} className="chip-indigo !py-0 !px-1 text-[10px]">
+        <span key={`c-${key++}`} className="chip-indigo align-baseline">
           [{citeMatch[1]}]
         </span>,
       );
