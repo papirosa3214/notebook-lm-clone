@@ -6,12 +6,12 @@ const isoNow = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 export const notebooks = sqliteTable('notebooks', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
-  // Default to local Ollama — coder30b-abl is the qwen3 MoE model (30.5B total,
-  // 3B active) currently installed on the inference box. MoE fits on 16 GB
-  // VRAM with bge-m3-embed pinned to GPU; dense 27B did not. Smaller models
-  // can be substituted per-notebook when available.
+  // Default to local Ollama — qwen3.6-27b-iq4-16k is the 27B model
+  // currently installed on the inference box. Same model Mnemosyne uses
+  // (MNEMOSYNE_LLM_MODEL), so behaviour stays consistent across apps.
+  // KV cache is Q4 and num_ctx is capped at 16384 in providers/ollama.ts.
   defaultProvider: text('default_provider').notNull().default('ollama'),
-  defaultModel: text('default_model').notNull().default('coder30b-abl:latest'),
+  defaultModel: text('default_model').notNull().default('qwen3.6-27b-iq4-16k:latest'),
   createdAt: text('created_at').notNull().default(isoNow),
 });
 

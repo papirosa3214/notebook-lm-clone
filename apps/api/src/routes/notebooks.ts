@@ -25,12 +25,12 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id,
         title,
-        // Local Ollama + coder30b-abl (qwen3 MoE, 30.5B/3B active) by default.
-        // (Was: qwen3.6-27b-iq4-16k — but dense 27B ate all 16 GB VRAM and
-        // forced bge-m3-embed onto CPU/RAM. 110 has no outbound network and
-        // can't pull new models, so we stay with whatever's actually installed.)
+        // Local Ollama + qwen3.6-27b-iq4-16k by default — same model
+        // Mnemosyne uses (MNEMOSYNE_LLM_MODEL), so chat behaviour is
+        // consistent across apps. 110 has no outbound network and can't
+        // pull new models, so we stay with what's actually installed.
         defaultProvider: defaultProvider ?? 'ollama',
-        defaultModel: defaultModel ?? 'coder30b-abl:latest',
+        defaultModel: defaultModel ?? 'qwen3.6-27b-iq4-16k:latest',
       })
       .run();
 

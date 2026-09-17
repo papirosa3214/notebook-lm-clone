@@ -34,7 +34,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   });
 
   const [provider, setProvider] = useState('ollama');
-  const [model, setModel] = useState('coder30b-abl:latest');
+  const [model, setModel] = useState('qwen3.6-27b-iq4-16k:latest');
 
   useEffect(() => {
     if (notebook.data) {
