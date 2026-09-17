@@ -21,7 +21,16 @@ export async function embed(text: string): Promise<Float32Array> {
   const res = await fetch(`${config.EMBEDDING_BASE_URL}/api/embeddings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.EMBEDDING_MODEL, prompt: text }),
+    body: JSON.stringify({
+      model: config.EMBEDDING_MODEL,
+      prompt: text,
+      // Override the systemd default OLLAMA_KEEP_ALIVE=0 so bge-m3-embed
+      // stays in VRAM between requests. Otherwise Ollama evicts it the
+      // instant the request finishes, and the next embed call has to
+      // cold-load from disk while chat is still resident.
+      keep_alive: '30m',
+      options: { num_gpu: 999 },
+    }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {

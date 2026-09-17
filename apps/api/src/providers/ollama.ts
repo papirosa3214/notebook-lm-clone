@@ -30,6 +30,15 @@ export class OllamaProvider implements LLMProvider {
       options: {
         temperature: req.temperature ?? 0.2,
         num_predict: req.maxTokens ?? 1024,
+        // coder30b-abl advertises a 262144-token native context. Without a
+        // cap the KV cache alone would consume ~25 GB at fp16 (head_count 32,
+        // head_count_kv 4, key_length 128, 48 layers → 96 KB/token). But
+        // Ollama 0.32.4+ auto-quantises KV to Q8 (general.quantization_version=2),
+        // so 16k KV costs ~0.8 GB instead of ~1.5 GB. The full chat model is
+        // 12.98 GB and bge-m3-embed is 0.88 GB — together ~14.7 GB, fits
+        // comfortably in 16 GB with headroom. 16k is plenty for retrieval-
+        // augmented chat + summary in this app.
+        num_ctx: 16384,
       },
     });
     const res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
