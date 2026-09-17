@@ -25,8 +25,13 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id,
         title,
-        defaultProvider: defaultProvider ?? 'anthropic',
-        defaultModel: defaultModel ?? 'claude-sonnet-4-5',
+        // Local Ollama + qwen3.6 by default — no API key required, and the
+        // model is already running on the inference box alongside
+        // bge-m3-embed. Matches the schema.ts defaults; the SQLite table
+        // itself still has the old defaults baked in, but this route always
+        // overrides them so that's irrelevant.
+        defaultProvider: defaultProvider ?? 'ollama',
+        defaultModel: defaultModel ?? 'qwen3.6-27b-iq4-16k:latest',
       })
       .run();
 
