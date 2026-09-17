@@ -5,7 +5,7 @@ import { ChatRequestSchema, ChatDeltaSchema, type CitationChunk } from '@noteboo
 import { CITATION_INSTRUCTIONS, formatContextForPrompt } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
 import { notebooks } from '../db/schema.js';
-import { retrieve, type RetrievalChunk } from '../vectordb/client.js';
+import { retrieve, retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
 
 function mapChunk(c: RetrievalChunk): CitationChunk {
@@ -57,14 +57,29 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const model = parsed.data.model ?? nb.defaultModel;
     const provider = getProvider(providerId);
 
-    // 1. retrieve top-k chunks as citations
+    // 1. retrieve top-k chunks as citations.
+    // retrieveWithRerank pulls a wider candidate pool (16) and reranks
+    // down to topK using an LLM-based scorer — better ordering for
+    // queries where the best chunk isn't the closest by embedding or
+    // BM25 alone. Falls back to plain retrieve on failure.
     const topK = parsed.data.topK ?? 5;
     let citations: CitationChunk[] = [];
     try {
-      const raw = await retrieve(req.params.id, parsed.data.message, topK);
+      const raw = await retrieveWithRerank(
+        req.params.id,
+        parsed.data.message,
+        topK,
+        { provider: providerId, model },
+      );
       citations = raw.map(mapChunk);
     } catch (err) {
-      req.log.warn({ err }, 'retrieve failed; proceeding without context');
+      req.log.warn({ err }, 'retrieve+rerank failed; falling back to plain retrieve');
+      try {
+        const raw = await retrieve(req.params.id, parsed.data.message, topK);
+        citations = raw.map(mapChunk);
+      } catch (err2) {
+        req.log.warn({ err: err2 }, 'retrieve failed; proceeding without context');
+      }
     }
 
     // 2. SSE headers

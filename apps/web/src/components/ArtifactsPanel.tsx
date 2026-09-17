@@ -34,6 +34,13 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
       onConsumedPrefilled?.();
     },
   });
+  const mindmap = useMutation({
+    mutationFn: () => api.createMindmap(notebookId),
+    onSuccess: ({ artifact }) => {
+      qc.invalidateQueries({ queryKey: ['artifacts', notebookId] });
+      setSelectedId(artifact.id);
+    },
+  });
 
   const selected = artifacts.data?.artifacts.find((a) => a.id === selectedId);
 
@@ -60,20 +67,31 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
             </span>
           )}
         </h2>
-        <button
-          onClick={() =>
-            create.mutate({
-              title: `Заметка ${new Date().toLocaleString('ru')}`,
-              contentMd: '# Новая заметка\n\n',
-            })
-          }
-          className="flex h-8 w-8 items-center justify-center rounded-full text-white transition-all hover:opacity-90 disabled:opacity-50"
-          style={{ backgroundColor: 'rgb(var(--nb-accent))' }}
-          disabled={create.isPending}
-          title="Создать заметку"
-        >
-          <PlusIcon size={14} />
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => mindmap.mutate()}
+            disabled={mindmap.isPending}
+            className="flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium text-muted transition-all hover:bg-surface-tint disabled:opacity-40"
+            style={{ borderColor: 'rgb(var(--nb-border))' }}
+            title="Сгенерировать майнд-карту ключевых концепций"
+          >
+            🧠 Майнд-карта
+          </button>
+          <button
+            onClick={() =>
+              create.mutate({
+                title: `Заметка ${new Date().toLocaleString('ru')}`,
+                contentMd: '# Новая заметка\n\n',
+              })
+            }
+            className="flex h-8 w-8 items-center justify-center rounded-full text-white transition-all hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: 'rgb(var(--nb-accent))' }}
+            disabled={create.isPending}
+            title="Создать заметку"
+          >
+            <PlusIcon size={14} />
+          </button>
+        </div>
       </div>
 
       {/* List */}

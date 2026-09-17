@@ -168,6 +168,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ title, contentMd }),
     }),
+  /** Generate a mind-map of the notebook's concepts. Backend persists it
+   *  as a regular artifact (contentMd is an inline SVG) and returns the
+   *  parsed graph alongside the artifact row. */
+  createMindmap: (notebookId: string, focus?: string) =>
+    http<{ artifact: Artifact; mindmap: { title: string; nodes: { id: string; label: string }[]; edges: { from: string; to: string }[] } }>(
+      `/api/notebooks/${notebookId}/mindmap`,
+      {
+        method: 'POST',
+        body: JSON.stringify(focus ? { focus } : {}),
+      },
+    ),
   updateArtifact: (id: string, patch: { title?: string; contentMd?: string }) =>
     http<Artifact>(`/api/artifacts/${id}`, {
       method: 'PATCH',

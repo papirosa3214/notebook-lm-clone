@@ -8,6 +8,7 @@ import { closeDb } from './db/index.js';
 import { notebookRoutes } from './routes/notebooks.js';
 import { sourceRoutes } from './routes/sources.js';
 import { chatRoutes } from './routes/chat.js';
+import { mindmapRoutes } from './routes/mindmap.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { searchRoutes } from './routes/search.js';
 import { discoverRoutes } from './routes/discover.js';
@@ -45,6 +46,7 @@ async function main() {
   await app.register(chatRoutes);
   await app.register(artifactRoutes);
   await app.register(searchRoutes);
+  await app.register(mindmapRoutes);
   await app.register(discoverRoutes);
   await app.register(summaryRoutes);
 

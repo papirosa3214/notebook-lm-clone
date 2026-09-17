@@ -242,6 +242,29 @@ export async function retrieve(
   question: string,
   topK = 6,
 ): Promise<RetrievalChunk[]> {
+  return retrieveRaw(notebookId, question, topK, false);
+}
+
+export async function retrieveWithRerank(
+  notebookId: string,
+  question: string,
+  topK = 6,
+  opts: { provider?: string; model?: string } = {},
+): Promise<RetrievalChunk[]> {
+  // Pull a wider candidate pool than topK so reranker has room to work.
+  const CANDIDATE_POOL = 16;
+  const candidates = await retrieveRaw(notebookId, question, CANDIDATE_POOL, true);
+  if (candidates.length <= 1) return candidates;
+  const { rerank } = await import('../lib/rerank.js');
+  return rerank(question, candidates, { topN: topK, ...opts });
+}
+
+async function retrieveRaw(
+  notebookId: string,
+  question: string,
+  topK: number,
+  _useFts: boolean,
+): Promise<RetrievalChunk[]> {
   const vec = await embed(question);
   const sqlite = getRawSqlite();
   // KNN: sqlite-vec returns distance in [0..2] for cosine (0 = identical).
