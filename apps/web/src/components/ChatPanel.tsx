@@ -158,6 +158,24 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     setStreaming(false);
   }
 
+  // Re-submit the most recent user-message with the currently selected
+  // provider/model. Called from the inline retry button under an error.
+  function retryLastUserMessage() {
+    const userMsg = [...messages].reverse().find((m) => m.role === 'user');
+    if (!userMsg) return;
+    setInput(userMsg.content);
+    setTimeout(() => send(), 0);
+  }
+
+  // Cycle the LLM provider ollama→anthropic→openai→ollama so the user can
+  // hop to a different backend after a failure without leaving the page.
+  function cycleProvider() {
+    const order: Array<'ollama' | 'anthropic' | 'openai'> = ['ollama', 'anthropic', 'openai'];
+    const cur = provider as (typeof order)[number];
+    const next = order[(order.indexOf(cur) + 1) % order.length]!;
+    setProvider(next);
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Two ways to send: plain Enter (the existing shortcut) or Cmd/Ctrl+Enter
     // (a common chat-app convention that doesn't fight multi-line input).
@@ -239,6 +257,8 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             message={m}
             onSaveArtifact={onSaveArtifact}
             onOpenCitation={onOpenCitation}
+            onRetry={retryLastUserMessage}
+            onCycleProvider={cycleProvider}
           />
         ))}
         <div ref={bottomRef} />
@@ -312,10 +332,14 @@ function MessageBubble({
   message,
   onSaveArtifact,
   onOpenCitation,
+  onRetry,
+  onCycleProvider,
 }: {
   message: ChatMessage;
   onSaveArtifact: (question: string, answer: string, citations: CitationChunk[]) => void;
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
+  onRetry?: () => void;
+  onCycleProvider?: () => void;
 }) {
   if (message.role === 'user') {
     return (
@@ -360,7 +384,26 @@ function MessageBubble({
         {message.error && (
           <div className="rounded-xl border bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300"
             style={{ borderColor: 'rgb(252 165 165 / 0.5)' }}>
-            Ошибка: {message.error}
+            <p className="mb-1.5"><span className="font-medium">Ошибка:</span> {message.error}</p>
+            <p className="mb-1.5 text-red-700/80 dark:text-red-300/80">
+              Если проблема в провайдере — попробуйте сменить модель выше и задать вопрос ещё раз.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={onRetry}
+                className="rounded-md border border-red-300 px-2 py-1 font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
+              >
+                🔄 Повторить
+              </button>
+              <button
+                type="button"
+                onClick={onCycleProvider}
+                className="rounded-md border border-red-300 px-2 py-1 font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
+              >
+                🔁 Сменить провайдера
+              </button>
+            </div>
           </div>
         )}
         {message.citations && message.citations.length > 0 && (

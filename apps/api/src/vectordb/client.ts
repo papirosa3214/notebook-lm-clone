@@ -5,6 +5,7 @@
  */
 import { config } from '../config.js';
 import { getRawSqlite } from '../db/index.js';
+import { retrievalCache } from './cache.js';
 
 export class VectorDbError extends Error {
   constructor(public status: number, message: string) {
@@ -145,6 +146,10 @@ export async function addSourceText(
     throw new VectorDbError(400, 'document has no extractable text');
   }
 
+  // New chunks means cached retrieval results for this notebook are stale —
+  // any answer that landed before this add missed what we're about to ingest.
+  retrievalCache.invalidateNotebook(input.notebookId);
+
   const insertVec = sqlite.prepare('INSERT INTO vec_chunks (embedding) VALUES (?)');
   const insertMeta = sqlite.prepare(
     `INSERT INTO chunks (vec_rowid, notebook_id, source_id, kind, title, url, content, ordinal)
@@ -265,6 +270,12 @@ async function retrieveRaw(
   topK: number,
   _useFts: boolean,
 ): Promise<RetrievalChunk[]> {
+  // Cache check — short-circuits the Ollama embeddings round-trip on repeat
+  // questions. Cache key includes notebookId + normalized question + topK so
+  // asking the same thing twice in a session is free.
+  const cached = retrievalCache.get({ notebookId, question, topK });
+  if (cached) return cached as RetrievalChunk[];
+
   const vec = await embed(question);
   const sqlite = getRawSqlite();
   // KNN: sqlite-vec returns distance in [0..2] for cosine (0 = identical).
@@ -368,7 +379,7 @@ async function retrieveRaw(
   // Sort by RRF score desc, take topK.
   const merged = [...hits.values()].sort((a, b) => b.rrf - a.rrf).slice(0, topK);
 
-  return merged.map((r) => ({
+  const result = merged.map((r) => ({
     id: `c${r.chunk_pk}`,
     doc_id: r.source_id,
     document_id: r.source_id,
@@ -380,6 +391,12 @@ async function retrieveRaw(
     similarity: r.rrf,
     score: r.rrf,
   }));
+
+  // Cache the result for repeat questions. Empty result is cached too — an
+  // empty notebook shouldn't hammer Ollama every retry.
+  retrievalCache.set({ notebookId, question, topK }, result);
+
+  return result;
 }
 
 // =========== Health =========
