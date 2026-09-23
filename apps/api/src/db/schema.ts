@@ -65,3 +65,24 @@ export const chunks = sqliteTable('chunks', {
   content: text('content').notNull(),
   ordinal: integer('ordinal').notNull().default(0),
 });
+
+// Persistent chat log per notebook. Each row is one turn (user or assistant).
+// `citations` is a JSON-encoded Citation[] (matches the shape stream emits in
+// the SSE 'citations' event). `provider`/`model` are denormalised for filtering
+// and re-using the same provider in /messages reflow without re-reading
+// notebooks.defaultProvider.
+export const messages = sqliteTable('messages', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id')
+    .notNull()
+    .references(() => notebooks.id, { onDelete: 'cascade' }),
+  role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
+  content: text('content').notNull(),
+  citations: text('citations'), // JSON-encoded Citation[] | null
+  provider: text('provider'),
+  model: text('model'),
+  // Optional: how many top-K retrieved chunks fed into this assistant turn.
+  // Nullable for legacy / system rows.
+  topK: integer('top_k'),
+  createdAt: text('created_at').notNull().default(isoNow),
+});

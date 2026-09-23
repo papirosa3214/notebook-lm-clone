@@ -1,10 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { ChatRequestSchema, ChatDeltaSchema, type CitationChunk } from '@notebook/shared';
 import { CITATION_INSTRUCTIONS, formatContextForPrompt } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
-import { notebooks } from '../db/schema.js';
+import { notebooks, messages } from '../db/schema.js';
 import { retrieve, retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
 
@@ -101,31 +101,126 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
     // 4. build messages
     const systemPrompt = `${CITATION_INSTRUCTIONS}\n\nSOURCES:\n${formatContextForPrompt(citations)}`;
-    const messages = [
+    const chatMessages = [
       { role: 'system' as const, content: systemPrompt },
       ...(parsed.data.history ?? []),
       { role: 'user' as const, content: parsed.data.message },
     ];
 
-    // 5. stream from provider
-    const messageId = nanoid(12);
+    // 4. Persist the user's turn BEFORE streaming so a crashed provider
+    //    still leaves a record of what was asked. We use a single nanoid that
+    //    we later reuse as a sibling assistant row's id-prefix for traceability.
+    const turnId = nanoid(12);
+    try {
+      db.insert(messages)
+        .values({
+          id: turnId,
+          notebookId: req.params.id,
+          role: 'user',
+          content: parsed.data.message,
+          citations: null,
+          provider: providerId,
+          model,
+        })
+        .run();
+    } catch (err) {
+      req.log.warn({ err }, 'failed to persist user turn — continuing');
+    }
+
+    // 5. stream from provider. We accumulate the assistant text in `textBuf`
+    //    so we can persist it once the stream ends (success or error).
+    const assistantTurnId = `${turnId}-a`;
+    let textBuf = '';
+    const messageId = assistantTurnId;
     try {
       for await (const ev of provider.chat({
         providerId,
         model,
-        messages,
+        messages: chatMessages,
         context: citations,
         temperature: 0.2,
         maxTokens: 1024,
       })) {
-        if (ev.text) send({ type: 'token', text: ev.text });
+        if (ev.text) {
+          textBuf += ev.text;
+          send({ type: 'token', text: ev.text });
+        }
         if (ev.done) break;
       }
       send({ type: 'done', messageId });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      // Persist assistant turn (full text + citations) regardless of whether
+      // streaming succeeded — errors are visible as completed rows with err
+      // text rather than silently missing turns.
+      try {
+        db.insert(messages)
+          .values({
+            id: assistantTurnId,
+            notebookId: req.params.id,
+            role: 'assistant',
+            content: textBuf,
+            citations: JSON.stringify(citations),
+            provider: providerId,
+            model,
+            topK,
+          })
+          .run();
+      } catch (err) {
+        req.log.warn({ err }, 'failed to persist assistant turn');
+      }
       reply.raw.end();
     }
+  });
+
+  // Chat history — newest first, paginated by `before` (created_at cursor) and `limit`.
+  // Returns rows with citations already parsed back into Citation[] so the UI
+  // doesn't need to JSON.parse() each row.
+  app.get<{
+    Params: { id: string };
+    Querystring: { limit?: string; before?: string };
+  }>('/api/notebooks/:id/messages', async (req, reply) => {
+    const db = getDb();
+    const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
+    if (!nb) return reply.code(404).send({ error: 'notebook not found' });
+
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 100) || 100, 1), 500);
+    const before = req.query.before;
+
+    const rows = before
+      ? db
+          .select()
+          .from(messages)
+          .where(
+            and(
+              eq(messages.notebookId, req.params.id),
+              lt(messages.createdAt, before),
+            ),
+          )
+          .orderBy(desc(messages.createdAt))
+          .limit(limit)
+          .all()
+      : db
+          .select()
+          .from(messages)
+          .where(eq(messages.notebookId, req.params.id))
+          .orderBy(desc(messages.createdAt))
+          .limit(limit)
+          .all();
+
+    return {
+      messages: rows.reverse().map((r) => ({
+        id: r.id,
+        role: r.role,
+        content: r.content,
+        citations: r.citations ? (JSON.parse(r.citations) as CitationChunk[]) : null,
+        provider: r.provider,
+        model: r.model,
+        topK: r.topK,
+        createdAt: r.createdAt,
+      })),
+      nextBefore: rows.length === limit ? rows[rows.length - 1]?.createdAt : null,
+    };
   });
 };

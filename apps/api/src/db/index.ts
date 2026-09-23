@@ -89,6 +89,24 @@ function migrate(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
     CREATE INDEX IF NOT EXISTS idx_chunks_vec_rowid ON chunks(vec_rowid);
 
+    -- Persistent chat log. One row per turn. Kept in a separate CREATE so the
+    -- SQL above stays readable (CHECK (...) with quoted strings confuses some
+    -- parsers when mixed into a giant template literal).
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      citations TEXT,
+      provider TEXT,
+      model TEXT,
+      top_k INTEGER,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_notebook_created
+      ON messages(notebook_id, created_at);
+
     -- Vector index. Dimension is fixed at module level (1024 for bge-m3-embed).
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
       embedding float[1024]
