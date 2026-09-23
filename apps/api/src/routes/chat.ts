@@ -99,8 +99,21 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     // 3. send citations first
     send({ type: 'citations', chunks: citations });
 
+    // 4. Optional graph-enriched context. We query the knowledge-graph store
+    //    for triples connected to the user's question — gives the LLM
+    //    explicit subject-predicate-object relations that the retrieval
+    //    embedding alone might have missed (GraphRAG-flavored, lightweight).
+    let graphContext = '';
+    try {
+      const { queryTriples, formatTriplesForPrompt } = await import('../vectordb/graph.js');
+      const triples = queryTriples(req.params.id, parsed.data.message, 10);
+      graphContext = formatTriplesForPrompt(triples);
+    } catch (err) {
+      req.log.warn({ err }, 'graph query failed; continuing without graph context');
+    }
+
     // 4. build messages
-    const systemPrompt = `${CITATION_INSTRUCTIONS}\n\nSOURCES:\n${formatContextForPrompt(citations)}`;
+    const systemPrompt = `${CITATION_INSTRUCTIONS}\n\nSOURCES:\n${formatContextForPrompt(citations)}${graphContext ? `\n\n${graphContext}` : ''}`;
     const chatMessages = [
       { role: 'system' as const, content: systemPrompt },
       ...(parsed.data.history ?? []),

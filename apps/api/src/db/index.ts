@@ -107,6 +107,24 @@ function migrate(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_messages_notebook_created
       ON messages(notebook_id, created_at);
 
+    -- Lightweight knowledge-graph storage. One row per subject-predicate-object
+    -- triple extracted from a source. The graph is built at ingest by calling
+    -- an LLM in graph.ts; queries match by LIKE on subject/object/predicate.
+    CREATE TABLE IF NOT EXISTS graph_triples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      subject TEXT NOT NULL,
+      predicate TEXT NOT NULL,
+      object TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_graph_triples_notebook
+      ON graph_triples(notebook_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_triples_source
+      ON graph_triples(source_id);
+
     -- Vector index. Dimension is fixed at module level (1024 for bge-m3-embed).
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
       embedding float[1024]
