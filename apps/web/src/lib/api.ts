@@ -1,6 +1,7 @@
 import type {
   Artifact,
   ChatDelta,
+  ChatHistoryResponse,
   CitationChunk,
   IngestProgressDelta,
   Notebook,
@@ -122,6 +123,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ query, maxResults }),
     }),
+
+  // Chat history — replaces the local-only ChatMessage[] on the front-end
+  // when a notebook is opened. Empty array if no messages persisted yet.
+  // `before` is created_at cursor (ISO string) for pagination.
+  getMessages: (notebookId: string, opts: { limit?: number; before?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.before) params.set('before', opts.before);
+    const qs = params.toString();
+    return http<ChatHistoryResponse>(
+      `/api/notebooks/${notebookId}/messages${qs ? `?${qs}` : ''}`,
+    );
+  },
   /** Step 1 of Discover: just web search, no ingest. */
   searchPreview: (notebookId: string, query: string, maxResults = 8) =>
     http<SearchPreviewResponse>(`/api/notebooks/${notebookId}/search-preview`, {

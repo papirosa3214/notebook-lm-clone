@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamChat } from '../lib/stream';
@@ -33,6 +33,27 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
       return r as { id: string; defaultProvider: string; defaultModel: string };
     },
   });
+
+  // Persistent chat history. Replaces the local state on notebook switch and
+  // a fresh query after each streamed assistant turn (invalidation in the
+  // send() flow below) so reload preserves what was said.
+  const qc = useQueryClient();
+  const history = useQuery({
+    queryKey: ['messages', notebookId],
+    queryFn: () => api.getMessages(notebookId, { limit: 100 }),
+    enabled: !!notebookId,
+  });
+  useEffect(() => {
+    if (!history.data) return;
+    // Server returns oldest-first; flip to oldest-first in renderer order.
+    setMessages(
+      history.data.messages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        citations: m.citations ?? undefined,
+      })),
+    );
+  }, [history.data?.messages.length, notebookId]);
 
   // Sources are needed to drive the pinned SummaryCard — it counts
   // ready sources and shows the overview when at least one is ready.
@@ -103,6 +124,9 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
         onDone: () => {
           setStreaming(false);
           abortRef.current = null;
+          // Server has persisted the user+assistant rows by this point.
+          // Invalidate so a reload (or any other observer) sees the new history.
+          qc.invalidateQueries({ queryKey: ['messages', notebookId] });
         },
         onAbort: () => {
           // Refresh / Strict-Mode double-mount superseded us — reset state
@@ -120,6 +144,9 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
               next[next.length - 1] = { ...last, error: msg, pending: false };
             return next;
           });
+          // The assistant row persisted with empty content + error encoded
+          // into the row, so refresh history so the next reload shows it.
+          qc.invalidateQueries({ queryKey: ['messages', notebookId] });
         },
       },
     );
@@ -132,6 +159,13 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Two ways to send: plain Enter (the existing shortcut) or Cmd/Ctrl+Enter
+    // (a common chat-app convention that doesn't fight multi-line input).
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      send();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send();

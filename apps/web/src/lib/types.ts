@@ -106,3 +106,23 @@ export type IngestProgressDelta =
     }
   | { type: 'done'; source: Source }
   | { type: 'error'; message: string };
+
+// Chat history (matches API's GET /api/notebooks/:id/messages)
+// `citations` may be null for user rows, or empty array for assistant rows
+// whose stream errored before producing any text.
+export interface ChatMessageRow {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  citations: CitationChunk[] | null;
+  provider: string | null;
+  model: string | null;
+  topK: number | null;
+  createdAt: string;
+}
+
+export interface ChatHistoryResponse {
+  messages: ChatMessageRow[];
+  /** ISO created_at cursor for the next page. Null when there are no more pages. */
+  nextBefore: string | null;
+}

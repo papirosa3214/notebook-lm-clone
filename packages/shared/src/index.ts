@@ -64,6 +64,30 @@ export const ArtifactSchema = z.object({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
+// === Chat history row (server-side persistence) ===
+// Each row is one turn of a chat conversation. Used by the API to return
+// `GET /api/notebooks/:id/messages` to the web client and by the front-end
+// to render the persistent history on mount. `citations` may be null for user
+// rows or empty for assistant rows whose stream errored before producing text.
+
+export const ChatMessageRowSchema = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string(),
+  citations: z.array(CitationChunkSchema).nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  topK: z.number().nullable(),
+  createdAt: z.string(),
+});
+export type ChatMessageRow = z.infer<typeof ChatMessageRowSchema>;
+
+export const ChatHistoryResponseSchema = z.object({
+  messages: z.array(ChatMessageRowSchema),
+  nextBefore: z.string().nullable(),
+});
+export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;
+
 // === Chat (ChatMessage already defined above for internal use) ===
 
 export const ChatRequestSchema = z.object({

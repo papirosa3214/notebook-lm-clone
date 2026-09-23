@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -12,6 +12,7 @@ import { SummaryPanel } from '../components/SummaryPanel';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
+import { CommandPalette, useCommandPaletteHotkey, type CommandDef } from '../components/CommandPalette';
 import {
   NotebookLogoMark,
   MoonIcon,
@@ -99,7 +100,52 @@ function clamp(n: number, lo: number, hi: number) {
 export default function NotebookPage() {
   const { id } = useParams<{ id: string }>();
   const notebookId = id!;
+  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
+  const [paletteOpen, openPalette, closePalette] = useCommandPaletteHotkey();
+
+  const updateLayout = useCallback((patch: Partial<LayoutState>) => {
+    setLayout((prev) => {
+      const next = { ...prev, ...patch };
+      try {
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+      } catch {
+        /* quota — ignore */
+      }
+      return next;
+    });
+  }, []);
+  const commands: CommandDef[] = [
+    {
+      id: 'home',
+      label: '🏠 На главную',
+      hint: 'список ноутбуков',
+      keywords: ['home', 'notebooks', 'list'],
+      run: () => navigate('/'),
+    },
+    {
+      id: 'theme',
+      label: theme === 'dark' ? '☀️ Светлая тема' : '🌙 Тёмная тема',
+      hint: 'переключить',
+      keywords: ['theme', 'dark', 'light', 'тёмная'],
+      run: () => toggle(),
+    },
+    {
+      id: 'collapse-sources',
+      label: '📚 Скрыть источники',
+      hint: 'левая панель',
+      keywords: ['collapse', 'sources', 'panel', 'скрыть'],
+      run: () => updateLayout?.({ sourcesCollapsed: true }),
+    },
+    {
+      id: 'collapse-notes',
+      label: '📝 Скрыть заметки',
+      hint: 'правая панель',
+      keywords: ['collapse', 'notes', 'panel', 'скрыть'],
+      run: () => updateLayout?.({ notesCollapsed: true }),
+    },
+  ];
   const notebook = useQuery({
     queryKey: ['notebook', notebookId],
     queryFn: async () => {
@@ -119,20 +165,6 @@ export default function NotebookPage() {
     index: number;
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
-
-  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
-
-  const updateLayout = useCallback((patch: Partial<LayoutState>) => {
-    setLayout((prev) => {
-      const next = { ...prev, ...patch };
-      try {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
-      } catch {
-        /* quota — ignore */
-      }
-      return next;
-    });
-  }, []);
 
   // Live drag — drives both the visible width (via setLayout) and the
   // persisted layout so a reload keeps the user's choice.
@@ -424,6 +456,8 @@ export default function NotebookPage() {
           onClose={() => setOpenCitation(null)}
         />
       )}
+
+      <CommandPalette open={paletteOpen} onClose={() => closePalette(false)} commands={commands} />
     </div>
   );
 }
