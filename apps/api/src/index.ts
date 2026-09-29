@@ -13,6 +13,7 @@ import { searchRoutes } from './routes/search.js';
 import { graphRoutes } from './routes/graph.js';
 import { discoverRoutes } from './routes/discover.js';
 import { summaryRoutes } from './routes/summary.js';
+import { mindmapRoutes } from './routes/mindmap.js';
 
 async function main() {
   const app = Fastify({
@@ -48,6 +49,7 @@ async function main() {
   await app.register(searchRoutes);
   await app.register(discoverRoutes);
   await app.register(summaryRoutes);
+  await app.register(mindmapRoutes);
   await app.register(graphRoutes);
 
   const shutdown = async () => {
