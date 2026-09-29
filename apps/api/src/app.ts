@@ -35,11 +35,9 @@ export async function buildApp(
     limits: { fileSize: 50 * 1024 * 1024 },
   });
 
-  // Health route is intentionally minimal here (no embeddings ping) so
-  // tests can mount the app without a mocked Ollama. The real
-  // /api/health with ping lives in src/index.ts.
-  app.get('/api/health', async () => ({ ok: true, service: 'notebook-api' }));
-
+  // /api/health with ping lives in src/index.ts (real handler with
+  // embeddingsPing). Keeping a stub here collides with Fastify 5's
+  // duplicate-route detection.
   await app.register(notebookRoutes);
   await app.register(sourceRoutes);
   await app.register(chatRoutes);
