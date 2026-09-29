@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
 import { SourcesPanel } from '../components/SourcesPanel';
+import { SourceScopeProvider } from '../lib/sourceScopeContext';
 import { SourcesStrip } from '../components/SourcesStrip';
 import { ChatPanel } from '../components/ChatPanel';
 import { PanelErrorBoundary } from '../components/ErrorBoundary';
@@ -210,7 +211,8 @@ export default function NotebookPage() {
   const totalCount = sources.data?.sources.length ?? 0;
 
   return (
-    <div className="flex h-screen flex-col">
+    <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
+      <div className="flex h-screen flex-col">
       {/* ---- Top header ---- */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 md:px-6"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
@@ -459,6 +461,7 @@ export default function NotebookPage() {
 
       <CommandPalette open={paletteOpen} onClose={() => closePalette(false)} commands={commands} />
     </div>
+    </SourceScopeProvider>
   );
 }
 

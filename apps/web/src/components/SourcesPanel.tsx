@@ -9,6 +9,7 @@ import type {
   SourceKind,
 } from '../lib/types';
 import { SourceDetailSheet } from './SourceDetailSheet';
+import { useSourceScopeContext } from '../lib/sourceScopeContext';
 import {
   SourceIcon,
   PlusIcon,
@@ -75,6 +76,19 @@ export function SourcesPanel({ notebookId }: Props) {
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
 
+  // Source-scope state. Lives in context (provider is NotebookPage) so
+  // ChatPanel can read the same selection. If we're rendered without a
+  // provider (older layouts), fall back to "all sources" — no UI for
+  // toggling, but nothing breaks.
+  let scope: ReturnType<typeof useSourceScopeContext> | null = null;
+  try {
+    scope = useSourceScopeContext();
+  } catch {
+    scope = null;
+  }
+  const selectedIds = scope?.selectedIds ?? [];
+  const isScoped = scope?.isScoped ?? false;
+
   return (
     <div className="flex h-full flex-col bg-canvas">
       {/* Header */}
@@ -83,18 +97,32 @@ export function SourcesPanel({ notebookId }: Props) {
           Источники
           {totalCount > 0 && (
             <span className="ml-1.5 text-xs font-normal text-muted">
-              {readyCount}/{totalCount}
+              {isScoped
+                ? `${selectedIds.length} из ${readyCount} готовых`
+                : `${readyCount}/${totalCount}`}
             </span>
           )}
         </h2>
-        <button
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending}
-          className="btn-icon"
-          title="Обновить список"
-        >
-          <RefreshIcon size={14} className={refresh.isPending ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex items-center gap-1">
+          {scope && scope.hasReady && (
+            <button
+              type="button"
+              onClick={() => (isScoped ? scope.selectAll() : scope.clear())}
+              className="rounded-full px-2 py-1 text-[11px] font-medium text-muted hover:text-ink"
+              title={isScoped ? 'Сбросить выбор — все готовые' : 'Снять выбор — пустой чат'}
+            >
+              {isScoped ? 'Все' : 'Снять выбор'}
+            </button>
+          )}
+          <button
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            className="btn-icon"
+            title="Обновить список"
+          >
+            <RefreshIcon size={14} className={refresh.isPending ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       {/* Add source — 4 circular buttons in a row, like NotebookLM */}
@@ -128,6 +156,12 @@ export function SourcesPanel({ notebookId }: Props) {
               source={s}
               onSelect={() => setOpenSource(s)}
               onDelete={() => setPendingDelete(s)}
+              selected={scope ? scope.selectedIds.includes(s.id) : true}
+              onToggle={
+                scope && s.status === 'ready'
+                  ? () => scope.toggle(s.id)
+                  : undefined
+              }
             />
           ))}
         </ul>
@@ -222,10 +256,20 @@ function SourceItem({
   source: s,
   onSelect,
   onDelete,
+  selected,
+  onToggle,
 }: {
   source: Source;
   onSelect: () => void;
   onDelete: () => void;
+  /**
+   * Whether this source is currently in the chat scope. Always true
+   * for non-ready sources (their selection is ignored anyway), so the
+   * checkbox shows a "—" / disabled state instead.
+   */
+  selected: boolean;
+  /** Provided only when the source is ready and a scope context exists. */
+  onToggle?: () => void;
 }) {
   const statusBadge = {
     pending: { text: '⏳', cls: 'bg-surface-tint text-muted' },
@@ -241,6 +285,40 @@ function SourceItem({
   }[s.status];
   return (
     <li className="source-pill group">
+      {/* Selection checkbox. Only meaningful for ready sources. We
+          stop propagation so clicking the checkbox doesn't also open
+          the detail sheet. */}
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors"
+          style={{
+            backgroundColor: selected ? 'rgb(var(--nb-accent))' : 'transparent',
+            borderColor: selected ? 'rgb(var(--nb-accent))' : 'rgb(var(--nb-border))',
+            color: 'white',
+          }}
+          aria-label={selected ? 'Исключить из чата' : 'Включить в чат'}
+          title={selected ? 'Исключить из чата' : 'Включить в чат'}
+        >
+          {selected && (
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+              <path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
+      ) : (
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-dashed text-[10px] text-muted"
+          title="Этот источник ещё не готов"
+          aria-label="Источник не готов"
+        >
+          —
+        </span>
+      )}
       {/*
         The whole row is a click target that opens the detail sheet. The
         delete button is a sibling so it can stop propagation — clicking
