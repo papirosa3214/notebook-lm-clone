@@ -146,3 +146,5 @@ data: {"type":"done","messageId":"abc123"}\n\n
 - [x] Этап 6 (NotebookLM-фичи): summary panel, discover preview, mobile tabs (`2a2ec9c`)
 - [x] Этап 7: локальный vector store на sqlite-vec (выпилили Ragflow) (`d890b22`)
 - [x] Этап 8 (дизайн-система): CSS-токены + Tailwind, resizable/collapsible панели, mobile tabs, citation dialog, иконки, багфиксы
+- [x] Mind-map route registered (`f5c76f1`), single-source endpoint для SSE recovery (`f924271`), post-ingest knowledge-graph extraction (`06c6081`) — покрыто API smoke-тестами на временной SQLite + мок Ollama
+- [x] API test infrastructure: `apps/api/src/__tests__/` (миграции, single-source, mind map, graph extraction/cleanup). `pnpm test` зелёный: 12 shared + 11 api + 28 web

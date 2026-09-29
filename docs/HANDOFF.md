@@ -34,6 +34,18 @@
   только если ответ похож на `Source` (поле `kind`).
 - `apps/web/src/components/{SummaryPanel,ChatPanel}.tsx` — плейсхолдер
   «● ● ● Загружаю модель…» пока `streaming && !content`.
+- `apps/api/src/index.ts` — зарегистрирован `mindmapRoutes` (`f5c76f1`).
+- `apps/api/src/vectordb/graph.ts` — `buildTriplesForSourceId` для чтения чанков из БД;
+  `routes/sources.ts` — fire-and-forget извлечение triples после URL/YouTube/file upload
+  и `removeTriplesForSource` в DELETE (`06c6081`).
+- `apps/api/src/routes/sources.ts` — `GET /api/notebooks/:id/sources/:sourceId`
+  для SSE-fallback с проверкой принадлежности notebook (`f924271`).
+- `apps/api/src/app.ts` — `buildApp()` без `listen()`; `index.ts` его зовёт и вешает
+  реальный `/api/health`. Используется в тестах через `app.inject()`.
+- `apps/api/src/__tests__/` — smoke-rig: tmp SQLite через `DB_PATH`, мок `globalThis.fetch`
+  для 127.0.0.1:11434, vitest. 11 API-тестов: миграции, single-source endpoint
+  (включая anti-leak между notebook), mind map (с мок-LLM), graph extraction/cleanup.
+  `pnpm test` зелёный: 12 shared + 11 api + 28 web.
 
 ## Решения (утверждено)
 
