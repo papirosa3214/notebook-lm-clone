@@ -6,6 +6,19 @@ export interface ChatStreamOptions {
   provider?: string;
   model?: string;
   topK?: number;
+  /**
+   * Restrict retrieval to the selected sources. Absent or [] = all
+   * sources in the notebook. Validated by the API (400 on cross-
+   * notebook or unknown id). Persisted per-notebook via UI.
+   */
+  sourceIds?: string[];
+  /**
+   * Last N persisted user/assistant turns from this notebook so the
+   * LLM keeps conversational context across page reloads. The web
+   * side caps length and strips empty / error-only rows before
+   * sending. See ChatPanel for the trim logic.
+   */
+  history?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   signal?: AbortSignal;
 }
 
@@ -34,6 +47,8 @@ export function streamChat(opts: ChatStreamOptions, handlers: ChatStreamHandlers
       provider: opts.provider,
       model: opts.model,
       topK: opts.topK,
+      sourceIds: opts.sourceIds,
+      history: opts.history,
     },
     opts.signal,
     handlers,

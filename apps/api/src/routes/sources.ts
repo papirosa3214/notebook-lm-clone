@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { getDb } from '../db/index.js';
+import { getDb, getRawSqlite } from '../db/index.js';
 import { notebooks, sources } from '../db/schema.js';
 import { extractDocx, extractPdf, extractPlainText } from '../extractors/index.js';
 import { fetchUrlToMarkdown } from '../extractors/url.js';
@@ -42,7 +42,15 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
   // before `done` fires, the client polls this to recover the row by
   // sourceId. We verify the source belongs to :id so a stale id from
   // a previous notebook can't leak cross-notebook state.
-  app.get<{ Params: { id: string; sourceId: string } }>(
+  //
+  // Optional `?include=chunks&limit=N` (default 50, max 200) returns
+  // the source's chunk bodies in ordinal order so the source reader
+  // can render them without a second roundtrip. We cap the limit so
+  // a notebook with thousands of chunks can't be slurped in one call.
+  app.get<{
+    Params: { id: string; sourceId: string };
+    Querystring: { include?: string; limit?: string };
+  }>(
     '/api/notebooks/:id/sources/:sourceId',
     async (req, reply) => {
       const db = getDb();
@@ -52,7 +60,34 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
         .where(and(eq(sources.id, req.params.sourceId), eq(sources.notebookId, req.params.id)))
         .get();
       if (!src) return reply.code(404).send({ error: 'source not found' });
-      return src;
+      if (req.query.include !== 'chunks') return src;
+
+      const limit = Math.min(Math.max(parseInt(req.query.limit ?? '50', 10) || 50, 1), 200);
+      const raw = getRawSqlite();
+      const rows = raw
+        .prepare(
+          `SELECT id, ordinal, content, length(content) AS content_len
+           FROM chunks
+           WHERE source_id = ?
+           ORDER BY ordinal ASC
+           LIMIT ?`,
+        )
+        .all(src.id, limit) as Array<{
+        id: number;
+        ordinal: number;
+        content: string;
+        content_len: number;
+      }>;
+      return {
+        ...src,
+        chunks: rows.map((r) => ({
+          id: r.id,
+          ordinal: r.ordinal,
+          content: r.content,
+          contentLen: r.content_len,
+        })),
+        chunksReturned: rows.length,
+      };
     },
   );
 

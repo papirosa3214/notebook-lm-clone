@@ -37,8 +37,18 @@ class RetrievalCache {
     topK: number;
     provider?: string;
     model?: string;
+    /**
+     * Normalised (sorted, joined) sourceIds. Absent/empty string means
+     * "all sources" — same key as before the sourceIds feature.
+     * Order matters for cache correctness: [a,b] and [b,a] must hit
+     * the same row.
+     */
+    sourceIds?: string[];
   }): string {
     const normalized = key.question.trim().toLowerCase();
+    const sources = key.sourceIds && key.sourceIds.length > 0
+      ? [...key.sourceIds].sort().join(',')
+      : '';
     return createHash('sha256')
       .update(key.notebookId)
       .update('|')
@@ -49,10 +59,19 @@ class RetrievalCache {
       .update(key.provider ?? '')
       .update('|')
       .update(key.model ?? '')
+      .update('|')
+      .update(sources)
       .digest('hex');
   }
 
-  get(key: { notebookId: string; question: string; topK: number; provider?: string; model?: string }): unknown[] | null {
+  get(key: {
+    notebookId: string;
+    question: string;
+    topK: number;
+    provider?: string;
+    model?: string;
+    sourceIds?: string[];
+  }): unknown[] | null {
     const k = this.hashKey(key);
     const entry = this.map.get(k);
     if (!entry) return null;
@@ -67,7 +86,14 @@ class RetrievalCache {
   }
 
   set(
-    key: { notebookId: string; question: string; topK: number; provider?: string; model?: string },
+    key: {
+      notebookId: string;
+      question: string;
+      topK: number;
+      provider?: string;
+      model?: string;
+      sourceIds?: string[];
+    },
     chunks: unknown[],
   ): void {
     const k = this.hashKey(key);

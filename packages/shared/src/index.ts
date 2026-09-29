@@ -96,6 +96,13 @@ export const ChatRequestSchema = z.object({
   provider: ProviderIdSchema.optional(),
   model: z.string().optional(),
   topK: z.number().int().min(1).max(20).optional(),
+  /**
+   * Optional source filter. Absent or empty array = all sources in the
+   * notebook. The API validates every id belongs to :notebookId and
+   * rejects the request with 400 otherwise (no silent fallback to "all"
+   * — that would let a stale id leak across notebooks).
+   */
+  sourceIds: z.array(z.string().min(1)).max(50).optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 

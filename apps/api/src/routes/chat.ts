@@ -1,21 +1,57 @@
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { ChatRequestSchema, ChatDeltaSchema, type CitationChunk } from '@notebook/shared';
 import { CITATION_INSTRUCTIONS, formatContextForPrompt } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
-import { notebooks, messages } from '../db/schema.js';
+import { notebooks, messages, sources } from '../db/schema.js';
 import { retrieve, retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
+
+/**
+ * Validate the client-supplied source filter. Three outcomes:
+ *  - empty input: return `ids: undefined` so the retrieval pipeline
+ *    searches the whole notebook (preserves pre-sourceIds behaviour).
+ *  - all ids resolve to sources in this notebook: return the deduped
+ *    list so retrieval can use it as an IN (...) filter.
+ *  - any id is missing or belongs to a different notebook: return
+ *    a 400 error rather than silently dropping the bad id (which
+ *    would let a stale id from a previous notebook change the
+ *    behaviour of the request without the user noticing).
+ */
+async function resolveScopedSources(
+  notebookId: string,
+  requested: string[],
+): Promise<{ ids?: string[] } | { error: string }> {
+  if (requested.length === 0) return { ids: undefined };
+  const dedup = Array.from(new Set(requested));
+  const db = getDb();
+  const found = db
+    .select({ id: sources.id })
+    .from(sources)
+    .where(and(eq(sources.notebookId, notebookId), inArray(sources.id, dedup)))
+    .all();
+  if (found.length !== dedup.length) {
+    const foundSet = new Set(found.map((r) => r.id));
+    const missing = dedup.filter((id) => !foundSet.has(id));
+    return { error: `unknown or cross-notebook sourceIds: ${missing.join(', ')}` };
+  }
+  return { ids: found.map((r) => r.id) };
+}
 
 function mapChunk(c: RetrievalChunk): CitationChunk {
   return {
     id: c.id,
-    sourceId: c.doc_id,
+    sourceId: c.sourceId ?? c.doc_id,
     sourceTitle: c.docnm_kwd,
-    sourceKind: 'url',
+    // Use the kind we attached at retrieval time so file/YouTube sources
+    // are no longer mislabelled as 'url'. Defensive fallback for old
+    // cache rows that pre-date the field.
+    sourceKind: c.sourceKind ?? 'url',
     text: c.content,
     score: c.similarity,
+    location:
+      typeof c.ordinal === 'number' ? `Фрагмент ${c.ordinal + 1}` : undefined,
   };
 }
 
@@ -28,20 +64,26 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     return { provider: id, default: provider.defaultModel, models };
   });
 
-  // dry-run retrieval
-  app.get<{ Params: { id: string }; Querystring: { q?: string; topK?: string } }>(
-    '/api/notebooks/:id/retrieve',
-    async (req, reply) => {
-      const q = req.query.q;
-      if (!q) return reply.code(400).send({ error: 'q is required' });
-      const topK = Number(req.query.topK ?? '5');
-      const db = getDb();
-      const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
-      if (!nb) return reply.code(404).send({ error: 'notebook not found' });
-      const chunks = await retrieve(req.params.id, q, topK);
-      return { chunks, citations: chunks.map(mapChunk) };
-    },
-  );
+  // dry-run retrieval. Accepts optional ?sourceIds=a,b,c so the
+  // /retrieve endpoint can also be used to preview the effect of a
+  // source scope without running a full /chat round-trip. The
+  // SQL-side filter is the same one /chat applies via retrieveRaw.
+  app.get<{
+    Params: { id: string };
+    Querystring: { q?: string; topK?: string; sourceIds?: string };
+  }>('/api/notebooks/:id/retrieve', async (req, reply) => {
+    const q = req.query.q;
+    if (!q) return reply.code(400).send({ error: 'q is required' });
+    const topK = Number(req.query.topK ?? '5');
+    const db = getDb();
+    const nb = db.select().from(notebooks).where(eq(notebooks.id, req.params.id)).get();
+    if (!nb) return reply.code(404).send({ error: 'notebook not found' });
+    const sourceIds = req.query.sourceIds
+      ? req.query.sourceIds.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const chunks = await retrieve(req.params.id, q, topK, sourceIds);
+    return { chunks, citations: chunks.map(mapChunk) };
+  });
 
   // SSE chat
   app.post<{ Params: { id: string } }>('/api/notebooks/:id/chat', async (req, reply) => {
@@ -62,20 +104,35 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     // down to topK using an LLM-based scorer — better ordering for
     // queries where the best chunk isn't the closest by embedding or
     // BM25 alone. Falls back to plain retrieve on failure.
+    //
+    // sourceIds filter: when the client asks for a subset of sources,
+    // we validate every id belongs to this notebook *before* calling
+    // retrieval so a stale id from a previous notebook can't leak
+    // across. Absent or empty = search all sources in the notebook.
     const topK = parsed.data.topK ?? 5;
+    const requestedSources = parsed.data.sourceIds ?? [];
+    const scopedSourceIds = await resolveScopedSources(req.params.id, requestedSources);
+    if ('error' in scopedSourceIds) {
+      return reply.code(400).send({ error: scopedSourceIds.error });
+    }
     let citations: CitationChunk[] = [];
     try {
       const raw = await retrieveWithRerank(
         req.params.id,
         parsed.data.message,
         topK,
-        { provider: providerId, model },
+        { provider: providerId, model, sourceIds: scopedSourceIds.ids },
       );
       citations = raw.map(mapChunk);
     } catch (err) {
       req.log.warn({ err }, 'retrieve+rerank failed; falling back to plain retrieve');
       try {
-        const raw = await retrieve(req.params.id, parsed.data.message, topK);
+        const raw = await retrieve(
+          req.params.id,
+          parsed.data.message,
+          topK,
+          scopedSourceIds.ids,
+        );
         citations = raw.map(mapChunk);
       } catch (err2) {
         req.log.warn({ err: err2 }, 'retrieve failed; proceeding without context');

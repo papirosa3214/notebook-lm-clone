@@ -236,29 +236,43 @@ export interface RetrievalChunk {
   vector_similarity?: number;
   term_similarity?: number;
   score?: number;
+  /**
+   * Source kind ('url' | 'file' | 'youtube') and id — added so the
+   * chat pipeline can populate CitationChunk.sourceKind without a
+   * second DB roundtrip. ordinal is the chunk's 0-based position
+   * inside the source (used to render "Фрагмент N").
+   */
+  sourceKind?: 'url' | 'file' | 'youtube';
+  sourceId?: string;
+  ordinal?: number;
 }
 
 /**
  * KNN over the notebook's chunks. Returns top-K by cosine distance.
  * Shape mirrors what Ragflow returned so the LLM-side code stays untouched.
+ *
+ * If `sourceIds` is non-empty, the result is restricted to chunks whose
+ * source_id is in that list. The list is validated by the route handler
+ * to belong to `notebookId` — we trust the caller here.
  */
 export async function retrieve(
   notebookId: string,
   question: string,
   topK = 6,
+  sourceIds?: string[],
 ): Promise<RetrievalChunk[]> {
-  return retrieveRaw(notebookId, question, topK, false);
+  return retrieveRaw(notebookId, question, topK, false, sourceIds);
 }
 
 export async function retrieveWithRerank(
   notebookId: string,
   question: string,
   topK = 6,
-  opts: { provider?: string; model?: string } = {},
+  opts: { provider?: string; model?: string; sourceIds?: string[] } = {},
 ): Promise<RetrievalChunk[]> {
   // Pull a wider candidate pool than topK so reranker has room to work.
   const CANDIDATE_POOL = 16;
-  const candidates = await retrieveRaw(notebookId, question, CANDIDATE_POOL, true);
+  const candidates = await retrieveRaw(notebookId, question, CANDIDATE_POOL, true, opts.sourceIds);
   if (candidates.length <= 1) return candidates;
   const { rerank } = await import('../lib/rerank.js');
   return rerank(question, candidates, { topN: topK, ...opts });
@@ -269,11 +283,23 @@ async function retrieveRaw(
   question: string,
   topK: number,
   _useFts: boolean,
+  sourceIds?: string[],
 ): Promise<RetrievalChunk[]> {
+  // Source-scope filter. When sourceIds is non-empty we restrict BOTH
+  // the KNN and the BM25 query to chunks belonging to those sources.
+  // The route handler validates that every id belongs to notebookId
+  // before this point, so the SQL filter is a defence-in-depth check.
+  const scoped = sourceIds && sourceIds.length > 0;
+  const sourceFilter = scoped
+    ? ` AND c.source_id IN (${sourceIds!.map(() => '?').join(',')})`
+    : '';
+  const sourceParams = scoped ? sourceIds! : [];
+
   // Cache check — short-circuits the Ollama embeddings round-trip on repeat
-  // questions. Cache key includes notebookId + normalized question + topK so
-  // asking the same thing twice in a session is free.
-  const cached = retrievalCache.get({ notebookId, question, topK });
+  // questions. Cache key includes notebookId + normalized question + topK +
+  // sorted sourceIds so asking the same thing twice in the same source
+  // scope is free; asking across a different scope misses.
+  const cached = retrievalCache.get({ notebookId, question, topK, sourceIds });
   if (cached) return cached as RetrievalChunk[];
 
   const vec = await embed(question);
@@ -286,20 +312,24 @@ async function retrieveRaw(
               c.title AS title,
               c.url AS url,
               c.content AS content,
+              c.kind AS kind,
+              c.ordinal AS ordinal,
               v.distance AS distance
        FROM vec_chunks v
        JOIN chunks c ON c.vec_rowid = v.rowid
        WHERE v.embedding MATCH ? AND k = ?
-         AND c.notebook_id = ?
+         AND c.notebook_id = ?${sourceFilter}
        ORDER BY v.distance
        LIMIT ?`,
     )
-    .all(Buffer.from(vec.buffer), topK, notebookId, topK) as Array<{
+    .all(Buffer.from(vec.buffer), topK, notebookId, ...sourceParams, topK) as Array<{
     chunk_pk: number;
     source_id: string;
     title: string;
     url: string | null;
     content: string;
+    kind: 'url' | 'file' | 'youtube';
+    ordinal: number;
     distance: number;
   }>;
 
@@ -320,26 +350,32 @@ async function retrieveRaw(
               c.title AS title,
               c.url AS url,
               c.content AS content,
+              c.kind AS kind,
+              c.ordinal AS ordinal,
               bm25(chunks_fts) AS bm25_score
        FROM chunks_fts
        JOIN chunks c ON c.id = chunks_fts.rowid
        WHERE chunks_fts MATCH ?
-         AND c.notebook_id = ?
+         AND c.notebook_id = ?${sourceFilter}
        ORDER BY bm25_score
        LIMIT ?`,
     )
-    .all(question, notebookId, topK) as Array<{
+    .all(question, notebookId, ...sourceParams, topK) as Array<{
     chunk_pk: number;
     source_id: string;
     title: string;
     url: string | null;
     content: string;
+    kind: 'url' | 'file' | 'youtube';
+    ordinal: number;
     bm25_score: number;
   }>;
 
   type Hit = {
     chunk_pk: number;
     source_id: string;
+    source_kind: 'url' | 'file' | 'youtube';
+    ordinal: number;
     title: string;
     url: string | null;
     content: string;
@@ -352,6 +388,8 @@ async function retrieveRaw(
     hits.set(r.chunk_pk, {
       chunk_pk: r.chunk_pk,
       source_id: r.source_id,
+      source_kind: r.kind,
+      ordinal: r.ordinal,
       title: r.title,
       url: r.url,
       content: r.content,
@@ -368,6 +406,8 @@ async function retrieveRaw(
       hits.set(r.chunk_pk, {
         chunk_pk: r.chunk_pk,
         source_id: r.source_id,
+        source_kind: r.kind,
+        ordinal: r.ordinal,
         title: r.title,
         url: r.url,
         content: r.content,
@@ -390,11 +430,16 @@ async function retrieveRaw(
     // RRF score is unbounded but monotonic — UI uses it for ordering only.
     similarity: r.rrf,
     score: r.rrf,
+    // Chat pipeline reads these to populate CitationChunk without a
+    // second DB lookup per chunk.
+    sourceKind: r.source_kind,
+    sourceId: r.source_id,
+    ordinal: r.ordinal,
   }));
 
   // Cache the result for repeat questions. Empty result is cached too — an
   // empty notebook shouldn't hammer Ollama every retry.
-  retrievalCache.set({ notebookId, question, topK }, result);
+  retrievalCache.set({ notebookId, question, topK, sourceIds }, result);
 
   return result;
 }
