@@ -109,9 +109,10 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `POST /api/notebooks/:id/sources/youtube` | Добавить YouTube |
 | `POST /api/notebooks/:id/sources/upload` | multipart upload PDF/DOCX/TXT/MD |
 | `POST /api/notebooks/:id/sources/refresh` | Polling статусов |
-| `DELETE /api/sources/:id` | Удалить источник |
-| `GET /api/notebooks/:id/retrieve?q=...` | Top-k chunks без LLM (preview) |
-| `POST /api/notebooks/:id/chat` | SSE стрим ответа с citations |
+| `DELETE /api/sources/:id` | Удалить источник (clean up triples) |
+| `GET /api/notebooks/:id/sources/:sourceId?include=chunks` | Single source + опциональные чанки (SSE fallback / reader) |
+| `GET /api/notebooks/:id/retrieve?q=...&sourceIds=...` | Top-k chunks без LLM (preview); фильтр по `sourceIds` |
+| `POST /api/notebooks/:id/chat` | SSE стрим ответа с citations; `sourceIds` + `history` в теле |
 | `GET /api/providers/:id/models` | Список моделей провайдера |
 | `GET /api/notebooks/:id/artifacts` | Список артефактов |
 | `POST /api/notebooks/:id/artifacts` | Создать |
@@ -147,4 +148,9 @@ data: {"type":"done","messageId":"abc123"}\n\n
 - [x] Этап 7: локальный vector store на sqlite-vec (выпилили Ragflow) (`d890b22`)
 - [x] Этап 8 (дизайн-система): CSS-токены + Tailwind, resizable/collapsible панели, mobile tabs, citation dialog, иконки, багфиксы
 - [x] Mind-map route registered (`f5c76f1`), single-source endpoint для SSE recovery (`f924271`), post-ingest knowledge-graph extraction (`06c6081`) — покрыто API smoke-тестами на временной SQLite + мок Ollama
+- [x] **Milestone 1: Source Workspace v1** (`023c016`, `ab3f335`, `767dd47`, `afdc648`):
+  - source-scoped chat (`sourceIds` filter через весь retrieval + RRF + rerank, ключ кэша)
+  - chat continuity (`history` payload, char-budgeted, FIFO)
+  - source reader: chunks-list в `SourceDetailSheet` + jump-to-chunk из цитаты
+  - UI source-scope selector: checkbox у каждого ready source, «Все источники» / «N из M источников» в чате, persistency через `localStorage`, авто-удаление удалённых source
 - [x] API test infrastructure: `apps/api/src/__tests__/` (миграции, single-source, mind map, graph extraction/cleanup). `pnpm test` зелёный: 12 shared + 11 api + 28 web
