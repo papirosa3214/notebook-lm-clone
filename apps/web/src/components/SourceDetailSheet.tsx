@@ -12,6 +12,12 @@ import {
 interface Props {
   source: Source;
   onClose: () => void;
+  /**
+   * When set, the chunk whose ordinal matches is highlighted on mount
+   * and the sheet scrolls it into view. Used by ChatPanel when a
+   * citation click opens the reader — passes the chunk's ordinal.
+   */
+  highlightOrdinal?: number;
 }
 
 /**
@@ -21,7 +27,7 @@ interface Props {
  *
  * Closing: Esc, click on backdrop, click on × button.
  */
-export function SourceDetailSheet({ source: sourceProp, onClose }: Props) {
+export function SourceDetailSheet({ source: sourceProp, onClose, highlightOrdinal }: Props) {
   const qc = useQueryClient();
 
   // Esc closes the sheet.
@@ -80,6 +86,30 @@ export function SourceDetailSheet({ source: sourceProp, onClose }: Props) {
       );
     },
   });
+
+  // Body chunks for the reader. Loaded only when the source is ready.
+  // Limit 200 matches the server cap; longer sources get a "show all
+  // chunks" affordance later (out of scope for Source Workspace v1).
+  const chunksQuery = useQuery({
+    queryKey: ['source-chunks', source.notebookId, source.id],
+    queryFn: () => api.getSourceChunks(source.notebookId, source.id, 200),
+    enabled: source.status === 'ready',
+    staleTime: 60_000,
+  });
+  const chunks = chunksQuery.data?.chunks ?? [];
+
+  // When a citation opens the sheet, scroll the matching chunk into view.
+  // We use a ref-map keyed by ordinal so each chunk can be targeted.
+  const chunkRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
+  useEffect(() => {
+    if (highlightOrdinal === undefined) return;
+    // Wait one frame so the sheet has rendered the chunk list.
+    const id = requestAnimationFrame(() => {
+      const el = chunkRefs.current.get(highlightOrdinal);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [highlightOrdinal, chunks.length]);
 
   // While the first generation is in flight the source row may still
   // carry summary=null. Render the placeholder until the API returns.
@@ -187,9 +217,86 @@ export function SourceDetailSheet({ source: sourceProp, onClose }: Props) {
             Не удалось перегенерировать: {(refresh.error as Error)?.message ?? 'unknown'}
           </p>
         )}
+
+        {/* Chunks body — list in ordinal order so the user can scroll
+            through what the LLM actually sees during retrieval. When
+            a citation opens this sheet, the matching chunk is scrolled
+            into view and highlighted. The server caps chunk returns at
+            200, so we render only what we got. */}
+        {source.status === 'ready' && chunks.length > 0 && (
+          <section className="mt-5">
+            <h4 className="mb-2 flex items-center justify-between text-sm font-medium">
+              <span>Текст источника</span>
+              <span className="text-xs font-normal text-muted">
+                {chunks.length} {ruChunksLabel(chunks.length)}
+              </span>
+            </h4>
+            <div
+              className="max-h-80 space-y-2 overflow-y-auto rounded-xl border p-3"
+              style={{ borderColor: 'rgb(var(--nb-border))' }}
+            >
+              {chunksQuery.isPending && (
+                <div className="space-y-2">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="shimmer h-12 rounded-lg" />
+                  ))}
+                </div>
+              )}
+              {chunks.map((c) => {
+                const isHighlighted = c.ordinal === highlightOrdinal;
+                return (
+                  <div
+                    key={c.id}
+                    ref={(el) => {
+                      if (el) chunkRefs.current.set(c.ordinal, el);
+                      else chunkRefs.current.delete(c.ordinal);
+                    }}
+                    data-chunk-ordinal={c.ordinal}
+                    className="rounded-lg border px-3 py-2 transition-colors"
+                    style={{
+                      borderColor: isHighlighted
+                        ? 'rgb(var(--nb-accent))'
+                        : 'rgb(var(--nb-border))',
+                      backgroundColor: isHighlighted
+                        ? 'rgb(var(--nb-accent-soft) / 0.4)'
+                        : 'rgb(var(--nb-surface))',
+                    }}
+                  >
+                    <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-subtle">
+                      <span>Фрагмент {c.ordinal + 1}</span>
+                      <span className="text-muted">·</span>
+                      <span className="text-muted">{c.contentLen} символов</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-ink">
+                      {c.content}
+                    </p>
+                  </div>
+                );
+              })}
+              {chunksQuery.isError && (
+                <p className="text-xs text-red-600">
+                  Не удалось загрузить фрагменты: {(chunksQuery.error as Error)?.message}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
+}
+
+/**
+ * "1 фрагмент", "2 фрагмента", "5 фрагментов" — small Russian
+ * pluralisation helper. Keeps the sheet text grammatical without
+ * pulling in the larger ruPlural util just for this label.
+ */
+function ruChunksLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'фрагмент';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'фрагмента';
+  return 'фрагментов';
 }
 
 function sourceKindLabel(kind: Source['kind']): string {

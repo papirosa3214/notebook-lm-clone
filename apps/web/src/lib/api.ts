@@ -167,6 +167,16 @@ export const api = {
       { method: 'POST' },
     ),
 
+  // Body of a source for the reader. Endpoint used:
+  // GET /api/notebooks/:id/sources/:sourceId?include=chunks&limit=200
+  getSourceChunks: (notebookId: string, sourceId: string, limit = 200) =>
+    http<{
+      id: string;
+      notebookId: string;
+      chunks: Array<{ id: number; ordinal: number; content: string; contentLen: number }>;
+      chunksReturned: number;
+    }>(`/api/notebooks/${notebookId}/sources/${sourceId}?include=chunks&limit=${limit}`),
+
   // retrieval (preview)
   retrieve: (notebookId: string, q: string, topK = 5) =>
     http<{ chunks: unknown[]; citations: CitationChunk[] }>(

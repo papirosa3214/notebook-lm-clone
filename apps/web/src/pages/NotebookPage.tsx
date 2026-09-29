@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
 import { SourcesPanel } from '../components/SourcesPanel';
+import { SourceDetailSheet } from '../components/SourceDetailSheet';
 import { SourceScopeProvider } from '../lib/sourceScopeContext';
 import { SourcesStrip } from '../components/SourcesStrip';
 import { ChatPanel } from '../components/ChatPanel';
@@ -451,13 +452,40 @@ export default function NotebookPage() {
       </div>
       )}
 
-      {openCitation && (
-        <CitationDialog
-          chunk={openCitation.chunk}
-          index={openCitation.index}
-          onClose={() => setOpenCitation(null)}
-        />
-      )}
+      {openCitation && (() => {
+        // "Фрагмент N" — open the source reader with the matching chunk
+        // highlighted + scrolled into view. Anything else falls back to
+        // the legacy dialog (kept for very small screens).
+        const m = /Фрагмент\s+(\d+)/.exec(openCitation.chunk.location ?? '');
+        if (m) {
+          return (
+            <SourceDetailSheet
+              source={{
+                id: openCitation.chunk.sourceId,
+                notebookId,
+                kind: openCitation.chunk.sourceKind,
+                title: openCitation.chunk.sourceTitle,
+                url: null,
+                status: 'ready',
+                error: null,
+                createdAt: '',
+                summary: null,
+                summaryTopics: null,
+                summarizedAt: null,
+              }}
+              highlightOrdinal={Number(m[1]) - 1}
+              onClose={() => setOpenCitation(null)}
+            />
+          );
+        }
+        return (
+          <CitationDialog
+            chunk={openCitation.chunk}
+            index={openCitation.index}
+            onClose={() => setOpenCitation(null)}
+          />
+        );
+      })()}
 
       <CommandPalette open={paletteOpen} onClose={() => closePalette(false)} commands={commands} />
     </div>
