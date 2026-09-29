@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamChat } from '../lib/stream';
+import { buildChatHistory } from '../lib/chatHistory';
+import {
+  scopeToSourceIds,
+  useSourceScopeContext,
+} from '../lib/sourceScopeContext';
 import type { ChatMessage, CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
 import { SummaryCard } from './SummaryCard';
@@ -20,6 +25,22 @@ interface Props {
 
 export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // Source-scope state. Falls back to "all" when no provider is
+  // present (older layouts / standalone tests).
+  let scope: ReturnType<typeof useSourceScopeContext> | null = null;
+  try {
+    scope = useSourceScopeContext();
+  } catch {
+    scope = null;
+  }
+  const scopedSourceIds = useMemo(
+    () => (scope ? scopeToSourceIds(scope.selectedIds, scope.readyIds) : undefined),
+    [scope],
+  );
+
+  // Compact history payload (last N valid turns, char-budgeted).
+  const historyForNextTurn = useMemo(() => buildChatHistory(messages), [messages]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<(() => void) | null>(null);
@@ -101,7 +122,15 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     let citations: CitationChunk[] = [];
 
     abortRef.current = streamChat(
-      { notebookId, message: text, provider, model, topK: 5 },
+      {
+        notebookId,
+        message: text,
+        provider,
+        model,
+        topK: 5,
+        sourceIds: scopedSourceIds,
+        history: historyForNextTurn,
+      },
       {
         onCitations: (chunks) => {
           citations = chunks;
@@ -200,6 +229,26 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             <SparkleIcon size={11} className="text-accent" />
             Чат
           </span>
+          {scope && scope.hasReady && (
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{
+                backgroundColor: scope.isScoped
+                  ? 'rgb(var(--nb-accent-soft) / 0.5)'
+                  : 'rgb(var(--nb-surface-tint))',
+                color: scope.isScoped ? 'rgb(var(--nb-accent))' : 'rgb(var(--nb-muted))',
+              }}
+              title={
+                scope.isScoped
+                  ? 'Чат ограничен выбранными источниками'
+                  : 'Чат по всем готовым источникам'
+              }
+            >
+              {scope.isScoped
+                ? `${scope.selectedIds.length} из ${scope.readyIds.length} источников`
+                : 'Все источники'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 text-xs">
           <select
