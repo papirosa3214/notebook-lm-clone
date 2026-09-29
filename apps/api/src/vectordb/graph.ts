@@ -132,6 +132,34 @@ export async function buildTriplesForSource(input: {
 }
 
 /**
+ * Read chunks for a source from the `chunks` table and feed them to
+ * `buildTriplesForSource`. The convenience wrapper exists so route handlers
+ * don't need to know how to query `chunks` (and so the LLM call still gets
+ * the same per-chunk input the lower-level function expects).
+ */
+export async function buildTriplesForSourceId(input: {
+  notebookId: string;
+  sourceId: string;
+  providerId: string;
+  model: string;
+}): Promise<number> {
+  const sqlite = getRawSqlite();
+  const rows = sqlite
+    .prepare(
+      `SELECT id, content FROM chunks WHERE source_id = ? ORDER BY ordinal ASC`,
+    )
+    .all(input.sourceId) as Array<{ id: number; content: string }>;
+  if (rows.length === 0) return 0;
+  return buildTriplesForSource({
+    notebookId: input.notebookId,
+    sourceId: input.sourceId,
+    chunks: rows,
+    providerId: input.providerId,
+    model: input.model,
+  });
+}
+
+/**
  * Drop triples for a source (used when the source is removed).
  */
 export function removeTriplesForSource(sourceId: string): number {

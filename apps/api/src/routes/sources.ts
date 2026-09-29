@@ -8,6 +8,7 @@ import { extractDocx, extractPdf, extractPlainText } from '../extractors/index.j
 import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
 import { addSourceText, removeSource } from '../vectordb/client.js';
+import { buildTriplesForSourceId, removeTriplesForSource } from '../vectordb/graph.js';
 import { runIngest } from '../lib/ingestRun.js';
 import { summarizeSource } from '../lib/summarizeSource.js';
 import { autoPrepareEmbedding, autoReleaseEmbedding } from '../embedding/lifecycle.js';
@@ -110,13 +111,26 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .run();
 
             // Fire-and-forget per-source summary — we don't want ingest
-            // latency to depend on a second LLM call. summarizeSource()
-            // is idempotent (DB guard short-circuits if already filled).
+            // latency to depend on a second LLM call. summarizeSource() is
+            // idempotent (DB guard short-circuits if already filled).
             void summarizeSource(localId, {
               provider: nb.defaultProvider,
               model: nb.defaultModel,
             }).catch((err) => {
               app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+            });
+
+            // Fire-and-forget knowledge-graph extraction. Same reasoning as
+            // summarize: a few seconds of LLM work, but the source is already
+            // usable without it. /graph-related will pick the triples up
+            // on the next chat.
+            void buildTriplesForSourceId({
+              notebookId: req.params.id,
+              sourceId: localId,
+              providerId: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest graph triples failed');
             });
 
             const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
@@ -172,6 +186,9 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
     const src = db.select().from(sources).where(eq(sources.id, req.params.id)).get();
     if (!src) return reply.code(404).send({ error: 'source not found' });
     removeSource(req.params.id);
+    // Knowledge-graph triples live in a separate table (no FK) — clean them
+    // up explicitly so we don't accumulate orphans across notebook churn.
+    removeTriplesForSource(req.params.id);
     db.delete(sources).where(eq(sources.id, req.params.id)).run();
     return reply.code(204).send();
   });
@@ -233,6 +250,16 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
           model: nb.defaultModel,
         }).catch((err) => {
           app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+        });
+
+        // Fire-and-forget knowledge-graph extraction. see URL handler.
+        void buildTriplesForSourceId({
+          notebookId: req.params.id,
+          sourceId: localId,
+          providerId: nb.defaultProvider,
+          model: nb.defaultModel,
+        }).catch((err) => {
+          app.log.warn({ err, sourceId: localId }, 'post-ingest graph triples failed');
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -307,6 +334,17 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               model: nb.defaultModel,
             }).catch((err) => {
               app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+            });
+
+            // Fire-and-forget knowledge-graph extraction. see URL handler
+            // for rationale; same defaults.
+            void buildTriplesForSourceId({
+              notebookId: req.params.id,
+              sourceId: localId,
+              providerId: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest graph triples failed');
             });
             const stored = db.select().from(sources).where(eq(sources.id, localId)).get();
             if (!stored) throw new Error('source disappeared after insert');
