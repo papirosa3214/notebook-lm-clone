@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
@@ -37,6 +37,24 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
       .all();
     return { sources: list };
   });
+
+  // Get one source (SSE-fallback recovery). When the ingest stream dies
+  // before `done` fires, the client polls this to recover the row by
+  // sourceId. We verify the source belongs to :id so a stale id from
+  // a previous notebook can't leak cross-notebook state.
+  app.get<{ Params: { id: string; sourceId: string } }>(
+    '/api/notebooks/:id/sources/:sourceId',
+    async (req, reply) => {
+      const db = getDb();
+      const src = db
+        .select()
+        .from(sources)
+        .where(and(eq(sources.id, req.params.sourceId), eq(sources.notebookId, req.params.id)))
+        .get();
+      if (!src) return reply.code(404).send({ error: 'source not found' });
+      return src;
+    },
+  );
 
   // Add a URL — fetch → markdown → chunk → embed → store. With ?stream=1,
   // emits SSE progress events; otherwise returns the source as JSON.
