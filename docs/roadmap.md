@@ -84,51 +84,56 @@ hover popover показывает snippet + кнопку перехода в so
 **Цель:** кнопка в `NotebookPage` генерирует 3–10 минутный двухголосый
 подкаст по выбранным источникам, mp3 + транскрипт как артефакт.
 
-### B1. Скрипт-генерация
-- `POST /api/notebooks/:id/audio-overview` принимает
-  `{ style?: 'deep_dive' | 'short', focus?: string, sourceIds?: string[] }`.
-- Берёт top-N чанков через `retrieve()`.
-- LLM-промпт: «You are a podcast host Alex interviewing Mira about
-  <topic>. Alternate speakers. Use [N] markers from the provided sources.
-  Length: 1500–2000 words. Style: engaging, conversational. Reply in
-  Russian if the user's focus is in Russian.»
-- Сохраняет скрипт как `Artifact { kind: 'audio_overview_script' }`.
+### B1. Backend foundation — **сделано** (`517549e`..`8f0106f` на текущей ветке, плюс скрипт-first коммиты)
+- `packages/shared`: расширен `Artifact` (kind, meta), добавлены
+  `AudioOverviewRequest/Delta/Line/Meta` schemas.
+- `apps/api/src/lib/audio/`:
+  - `tts.ts` — `TtsProvider` interface
+  - `noopTts.ts` — script-only mode (default)
+  - `factory.ts` — `getTtsProvider()` по `TTS_PROVIDER` env
+  - `storage.ts` — `apps/api/data/audio/{notebookId}/{artifactId}.mp3`
+  - `scriptBuilder.ts` — `buildScript()` + `parseScriptText()`
+    (pure function для unit-тестов)
+- `apps/api/src/routes/audioOverview.ts`:
+  - `POST /api/notebooks/:id/audio-overview` — SSE: meta →
+    script_line*N → progress(synthesizing) → done | error
+  - `GET /api/audio/:notebookId/:filename` — стримит mp3 (404 если
+    noop не отрисовал)
+- Миграция `artifacts.kind` + `artifacts.meta` через
+  `addColumnIfMissing` (forward-only, безопасно на каждом бутстрапе).
+- Тесты: 8 на `parseScriptText` (prefix, fallback, STAGE,
+  full-width colon, blank lines, empty input), 3 на route
+  smoke (script-only happy path, unknown sourceIds, bad filename).
+- UI: `AudioOverviewDialog` + кнопка в шапке ноутбука.
 
-### B2. TTS-синтез
-- На Mac Apple Silicon:
-  - **kokoro-fastapi** (рекомендую): MIT, ~80MB, 4 голоса ru+en, HTTP на
-    `127.0.0.1:8001` (не конфликтует с whisper.cpp `:8000`).
-  - **OpenAI TTS** (`tts-1`/`tts-1-hd` через `OPENAI_API_KEY`): проще
-    в интеграции, но платно.
-  - **macOS `say`**: dev-fallback, голоса robotic.
-- Склейка через `ffmpeg`: два голоса (host/guest) → `amix` + `-af
-  pan=…`. Mp3 в `apps/api/data/audio/{notebookId}/{artifactId}.mp3`.
-- Статус в `audio_overviews` таблице.
+### B2. TTS-синтез — **требует решения по провайдеру**
+- Интерфейс `TtsProvider` уже на месте. Когда выберем движок,
+  добавим `OpenAiTtsProvider` / `MacSayTtsProvider` /
+  `KokoroTtsProvider` в `apps/api/src/lib/audio/`. Factory
+  (`TTS_PROVIDER` env) уже умеет резолвить эти имена (сейчас
+  warn+fallback на noop).
+- Склейка: ffmpeg `amix` для двух голосов; mp3 в
+  `apps/api/data/audio/{notebookId}/{artifactId}.mp3`.
+- Выбор сделан: script-only first, реальный TTS — после.
 
-### B3. SSE прогресс
-- События: `outline` → `script` (доля) → `tts_host` → `tts_guest` →
-  `mix` → `done`. Используем тот же `IngestProgressDelta`.
+### B3. UI (частично)
+- Кнопка и диалог с прогрессом уже есть (B1).
+- Карточка-результат: пока показывается транскрипт в диалоге.
+  Когда TTS подключим, добавим в ArtifactsPanel `<audio controls>`
+  + блок с метаданными (style, lineCount, duration).
 
-### B4. UI
-- Кнопка «Audio Overview» в верхней панели ноутбука.
-- Диалог с настройками (style, focus, source scope).
-- Прогресс через общий stepper.
-- Карточка-результат: HTML5 `<audio controls>` + транскрипт (скрипт
-  LLM, по которому генерировалось).
+**DoD скрипт-first:** добавил 3 URL → нажал Audio Overview → видишь
+транскрипт построчно, через ~30 сек артефакт сохранён с
+`kind='audio_overview'`, audioFilename=null. **Сейчас работает.**
 
-### B5. Тесты
-- `audioOverview` route возвращает 201, артефакт сохраняется.
-- Скрипт содержит обоих спикеров и `[N]`-маркеры.
-- TTS-вызов замокан на уровне `vitest` (реальное озвучивание — e2e).
+**Полный DoD (с TTS):** добавил 3 URL → нажал Audio Overview →
+через ~2 мин слушаю 5-минутный подкаст с двумя голосами на русском,
+цитаты в транскрипте кликабельны.
 
-**DoD:** добавил 3 URL → нажал Audio Overview → через 2 минуты слушаю
-5-минутный подкаст с двумя голосами на русском, цитаты в транскрипте
-кликабельны.
-
-**Решение по TTS** (требует подтверждения):
-1. `kokoro-fastapi` — рекомендую.
-2. OpenAI TTS.
-3. ElevenLabs.
+**TTS-кандидаты (открыто, требует подтверждения):**
+1. `kokoro-fastapi` — MIT, локально, ~80MB, 4 голоса ru+en.
+2. OpenAI TTS (`tts-1`/`tts-1-hd` через `OPENAI_API_KEY`).
+3. ElevenLabs — лучшее качество, но платно.
 
 ---
 
