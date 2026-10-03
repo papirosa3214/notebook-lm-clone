@@ -68,6 +68,10 @@ export interface BuildScriptResult {
  * "SCRIPT: …" or "MIRA: …" (or "STAGE: …") on every non-empty line.
  * Lines that don't match the prefix are tolerated (kept as part of the
  * previous speaker's turn) so a single typo doesn't drop a sentence.
+ *
+ * This is a thin wrapper around `parseScriptText` — the actual parsing
+ * logic is exposed separately so unit tests can exercise it without
+ * driving a real (or mocked) LLM stream.
  */
 export async function buildScript(args: BuildScriptArgs): Promise<BuildScriptResult> {
   const providerId = args.provider ?? 'ollama';
@@ -96,10 +100,6 @@ export async function buildScript(args: BuildScriptArgs): Promise<BuildScriptRes
   const lines: AudioOverviewLine[] = [];
   let raw = '';
 
-  // Tag the most recent line as "open" so a continuation (no prefix)
-  // gets appended to it instead of starting a new turn.
-  let openSpeaker: 'SCRIPT' | 'MIRA' | 'STAGE' | null = null;
-
   for await (const ev of provider.chat({
     providerId,
     model,
@@ -113,20 +113,15 @@ export async function buildScript(args: BuildScriptArgs): Promise<BuildScriptRes
   })) {
     if (ev.text) {
       raw += ev.text;
-      const parsed = drainCompleteLines(raw, openSpeaker, lines, args.onLine);
-      raw = parsed.remainder;
-      openSpeaker = parsed.openSpeaker;
     }
     if (ev.done) break;
   }
 
-  // Flush whatever was left after the stream ended.
-  if (raw.trim().length > 0) {
-    const speaker = openSpeaker ?? 'SCRIPT';
-    const text = raw.trim();
-    const line: AudioOverviewLine = { speaker, text };
+  // Parse the accumulated text in one go. parseScriptText handles
+  // every streaming concern (partial lines, continuation, etc.) and
+  // emits the same `onLine` callback contract.
+  for (const line of parseScriptText(raw, args.onLine)) {
     lines.push(line);
-    args.onLine?.(line);
   }
 
   return {
@@ -137,40 +132,39 @@ export async function buildScript(args: BuildScriptArgs): Promise<BuildScriptRes
 }
 
 /**
- * Walk the buffered text and emit any lines that already have a
- * speaker prefix and a newline. Return the unconsumed tail and the
- * currently-open speaker.
+ * Parse a complete (or partial) script blob into `AudioOverviewLine[]`.
+ *
+ * Pure function — no LLM, no async. This is the unit-testable core of
+ * the builder. `buildScript` accumulates streamed text and feeds the
+ * full payload here at the end; tests can call this directly with a
+ * fixture string.
+ *
+ * Behaviour:
+ *  - Lines starting with `SCRIPT:`, `MIRA:`, `STAGE:` (case-insensitive,
+ *    full-width colon `：` also accepted) start a new turn.
+ *  - A line without a prefix is treated as a continuation of the most
+ *    recent speaker; if no speaker has been opened yet, the line is
+ *    attributed to SCRIPT (models occasionally drop the prefix on the
+ *    first line).
+ *  - Blank lines are skipped.
+ *  - For each emitted line `onLine?.(line)` is invoked synchronously
+ *    before the function returns, so callers can stream to a UI
+ *    without re-walking the array.
  */
-function drainCompleteLines(
-  buf: string,
-  openSpeaker: 'SCRIPT' | 'MIRA' | 'STAGE' | null,
-  out: AudioOverviewLine[],
+export function* parseScriptText(
+  text: string,
   onLine?: (line: AudioOverviewLine) => void,
-): { remainder: string; openSpeaker: 'SCRIPT' | 'MIRA' | 'STAGE' | null } {
-  let remainder = buf;
-  let current: 'SCRIPT' | 'MIRA' | 'STAGE' | null = openSpeaker;
-
-  while (true) {
-    const nl = remainder.indexOf('\n');
-    if (nl === -1) break;
-    const rawLine = remainder.slice(0, nl);
-    remainder = remainder.slice(nl + 1);
-
-    const parsed = parseLine(rawLine, current);
-    if (!parsed) continue; // blank line, ignore
-
-    if (parsed.speaker !== current) {
-      // Speaker changed — close the previous turn (its text is whatever
-      // we accumulated as the openSpeaker's continuation). But because
-      // we already appended continuation text in-place at parse time, we
-      // just flip the speaker and push a fresh line.
-      current = parsed.speaker;
+): Generator<AudioOverviewLine> {
+  let openSpeaker: 'SCRIPT' | 'MIRA' | 'STAGE' | null = null;
+  for (const raw of text.split('\n')) {
+    const line = parseLine(raw, openSpeaker);
+    if (!line) continue;
+    if (line.speaker !== openSpeaker) {
+      openSpeaker = line.speaker;
     }
-    out.push(parsed);
-    onLine?.(parsed);
+    onLine?.(line);
+    yield line;
   }
-
-  return { remainder, openSpeaker: current };
 }
 
 /**
