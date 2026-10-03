@@ -228,4 +228,80 @@ describe('POST /api/notebooks/:id/artifacts/studio', () => {
     expect(set.cards[0]!.question).toBe('Что такое A2A?');
     expect(set.cards[0]!.id.length).toBeGreaterThan(4);
   });
+
+  it('persists data_table as JSON with columnCount/rowCount meta', async () => {
+    const llmPayload = JSON.stringify({
+      title: 'Сравнение протоколов',
+      columns: ['Протокол', 'Год', 'Назначение'],
+      rows: [
+        { Протокол: 'A2A', Год: '2025', Назначение: 'межагентное' },
+        { Протокол: 'MCP', Год: '2024', Назначение: 'инструменты' },
+      ],
+    });
+    env.mockOllama({ chatText: llmPayload });
+    const app = await env.getApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/notebooks/${NB_ID}/artifacts/studio`,
+      payload: { template: 'data_table' },
+    });
+    expect(res.statusCode).toBe(200);
+    const db = await env.getDb();
+    const all = db
+      .select()
+      .from((await import('../db/schema.js')).artifacts)
+      .where((await import('drizzle-orm')).eq((await import('../db/schema.js')).artifacts.notebookId, NB_ID))
+      .all();
+    const tableArtifact = all.find((a) => {
+      if (a.kind !== 'report' || !a.meta) return false;
+      const meta = JSON.parse(a.meta) as { template?: string };
+      return meta.template === 'data_table';
+    });
+    expect(tableArtifact, 'data_table artifact should be persisted').toBeDefined();
+    if (!tableArtifact) return;
+    const meta = JSON.parse(tableArtifact.meta!) as { template: string; columnCount: number; rowCount: number };
+    expect(meta.template).toBe('data_table');
+    expect(meta.columnCount).toBe(3);
+    expect(meta.rowCount).toBe(2);
+    const table = JSON.parse(tableArtifact.contentMd) as {
+      title?: string;
+      columns: string[];
+      rows: Array<Record<string, string>>;
+    };
+    expect(table.title).toBe('Сравнение протоколов');
+    expect(table.columns).toEqual(['Протокол', 'Год', 'Назначение']);
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0]!['Протокол']).toBe('A2A');
+  });
+
+  it('falls back to a "Нет данных" row when data_table LLM output is unparseable', async () => {
+    env.mockOllama({ chatText: 'Это вообще не JSON' });
+    const app = await env.getApp();
+    const before = Date.now();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/notebooks/${NB_ID}/artifacts/studio`,
+      payload: { template: 'data_table' },
+    });
+    expect(res.statusCode).toBe(200);
+    const db = await env.getDb();
+    const all = db
+      .select()
+      .from((await import('../db/schema.js')).artifacts)
+      .where((await import('drizzle-orm')).eq((await import('../db/schema.js')).artifacts.notebookId, NB_ID))
+      .all();
+    // The fallback row has exactly one row in meta; the happy-path
+    // table has 2 rows. Filter by rowCount === 1 to avoid picking
+    // the previous test's artifact.
+    const fallback = all.find((a) => {
+      if (a.kind !== 'report' || !a.meta) return false;
+      const meta = JSON.parse(a.meta) as { template?: string; rowCount?: number };
+      return meta.template === 'data_table' && meta.rowCount === 1 && new Date(a.createdAt).getTime() >= before - 1000;
+    });
+    expect(fallback, 'fallback data_table artifact should be persisted').toBeDefined();
+    if (!fallback) return;
+    const table = JSON.parse(fallback.contentMd) as { columns: string[]; rows: Array<Record<string, string>> };
+    expect(table.columns).toEqual(['Результат']);
+    expect(table.rows[0]!['Результат']).toBe('Нет данных');
+  });
 });
