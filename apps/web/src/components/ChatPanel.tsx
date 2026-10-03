@@ -11,6 +11,7 @@ import type { ChatMessage, CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
 import { SummaryCard } from './SummaryCard';
 import { CitationChip } from './CitationChip';
+import { SuggestionsChips } from './SuggestionsChips';
 import {
   SendIcon,
   StopIcon,
@@ -325,16 +326,28 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             </div>
           </div>
         )}
-        {messages.map((m, i) => (
-          <MessageBubble
-            key={i}
-            message={m}
-            onSaveArtifact={onSaveArtifact}
-            onOpenCitation={onOpenCitation}
-            onRetry={retryLastUserMessage}
-            onCycleProvider={cycleProvider}
-          />
-        ))}
+        {messages.map((m, i) => {
+          // Find the user message that produced this assistant
+          // answer. The chat send flow always pushes [user, assistant]
+          // so the user message is the row immediately before this
+          // one. For user messages we pass null (the chip row is
+          // only rendered under assistant answers).
+          const prev = i > 0 ? messages[i - 1] : undefined;
+          const prevUser = prev && prev.role === 'user' ? prev : null;
+          return (
+            <MessageBubble
+              key={i}
+              message={m}
+              notebookId={notebookId}
+              prevUser={prevUser}
+              onPick={setInput}
+              onSaveArtifact={onSaveArtifact}
+              onOpenCitation={onOpenCitation}
+              onRetry={retryLastUserMessage}
+              onCycleProvider={cycleProvider}
+            />
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -404,12 +417,21 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
 
 function MessageBubble({
   message,
+  notebookId,
+  prevUser,
+  onPick,
   onSaveArtifact,
   onOpenCitation,
   onRetry,
   onCycleProvider,
 }: {
   message: ChatMessage;
+  notebookId: string;
+  /** The user question that produced this assistant answer, if any.
+   *  Used to scope the suggestions endpoint. */
+  prevUser: ChatMessage | null;
+  /** Click handler for suggestion chips. */
+  onPick: (suggestion: string) => void;
   onSaveArtifact: (question: string, answer: string, citations: CitationChunk[]) => void;
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
   onRetry?: () => void;
@@ -499,12 +521,20 @@ function MessageBubble({
           <button
             className="btn btn-ghost text-xs"
             onClick={() => {
-              void onSaveArtifact('?', message.content, message.citations ?? []);
+              void onSaveArtifact(prevUser?.content ?? '?', message.content, message.citations ?? []);
             }}
             title="Сохранить как заметку"
           >
             Сохранить в заметки
           </button>
+        )}
+        {message.content && !message.pending && !message.error && prevUser && (
+          <SuggestionsChips
+            notebookId={notebookId}
+            question={prevUser.content}
+            answer={message.content}
+            onPick={onPick}
+          />
         )}
       </div>
     </div>
