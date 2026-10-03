@@ -13,6 +13,12 @@ export const notebooks = sqliteTable('notebooks', {
   defaultProvider: text('default_provider').notNull().default('ollama'),
   defaultModel: text('default_model').notNull().default('qwen3.6-27b-iq4-16k:latest'),
   createdAt: text('created_at').notNull().default(isoNow),
+  // Sharing (Milestone D). shareToken is a long random nanoid;
+  // shareEnabledAt is the ISO timestamp of the last enable. Revoke
+  // sets shareToken = NULL; the token itself is not re-used, so a
+  // revoked link returns 404 forever.
+  shareToken: text('share_token'),
+  shareEnabledAt: text('share_enabled_at'),
 });
 
 export const sources = sqliteTable('sources', {

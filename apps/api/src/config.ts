@@ -45,6 +45,12 @@ const schema = z.object({
   // with audioFilename=null). Real engines (openai / mac-say / kokoro)
   // are stubbed in the factory and will land in subsequent commits.
   TTS_PROVIDER: z.enum(['noop', 'openai', 'mac-say', 'kokoro']).default('noop'),
+
+  // Public base URL used to build share links. Falls back to a
+  // relative path (`/shared/:token`) so dev still works without
+  // configuring it. In Coolify / production set this to the public
+  // origin (e.g. https://notebook.example.com).
+  PUBLIC_BASE_URL: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -204,6 +204,12 @@ function migrate(sqlite: Database.Database) {
     `TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'audio_overview', 'report'))`,
   );
   addColumnIfMissing(sqlite, 'artifacts', 'meta', 'TEXT');
+
+  // Sharing (Milestone D). Both columns are nullable; revoking a
+  // share sets shareToken = NULL while keeping shareEnabledAt as
+  // the timestamp of the last enable.
+  addColumnIfMissing(sqlite, 'notebooks', 'share_token', 'TEXT');
+  addColumnIfMissing(sqlite, 'notebooks', 'share_enabled_at', 'TEXT');
 }
 
 function addColumnIfMissing(

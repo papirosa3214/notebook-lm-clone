@@ -200,6 +200,58 @@ export const StudioDeltaSchema = z.discriminatedUnion('type', [
 ]);
 export type StudioDelta = z.infer<typeof StudioDeltaSchema>;
 
+// === Sharing =============================================================
+// Read-only public link to a notebook. Single-user assumption: the
+// share token is a long random nanoid that the holder can use to
+// view a stripped-down snapshot of the notebook (no chat, no source
+// management, no add-source). The token lives in the notebook row
+// and can be revoked by setting it to null.
+
+/** Public, read-only view of a notebook. Returned by
+ *  `GET /api/shared/:token`. */
+export const SharedSourceSchema = z.object({
+  id: z.string(),
+  kind: SourceKindSchema,
+  title: z.string(),
+  url: z.string().nullable(),
+  status: SourceStatusSchema,
+  /** Per-source summary if summariseSource() has run. */
+  summary: z.string().nullable(),
+});
+export type SharedSource = z.infer<typeof SharedSourceSchema>;
+
+export const SharedArtifactSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  kind: z.enum(['note', 'audio_overview', 'report']),
+  /** Truncated preview (~300 chars) to keep the snapshot small. */
+  contentPreview: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SharedArtifact = z.infer<typeof SharedArtifactSchema>;
+
+export const SharedNotebookSchema = z.object({
+  title: z.string(),
+  createdAt: z.string(),
+  sources: z.array(SharedSourceSchema),
+  artifacts: z.array(SharedArtifactSchema),
+});
+export type SharedNotebook = z.infer<typeof SharedNotebookSchema>;
+
+/** Response to POST/GET /api/notebooks/:id/share. */
+export const NotebookShareSchema = z.object({
+  /** True if sharing is currently active. False after a revoke. */
+  enabled: z.boolean(),
+  /** Stable URL-safe token. Null when sharing is disabled. */
+  shareToken: z.string().nullable(),
+  /** Convenience: full URL the UI can copy. Null when disabled. */
+  shareUrl: z.string().nullable(),
+  /** ISO timestamp of when sharing was last enabled, null if never. */
+  shareEnabledAt: z.string().nullable(),
+});
+export type NotebookShare = z.infer<typeof NotebookShareSchema>;
+
 // === Chat history row (server-side persistence) ===
 // Each row is one turn of a chat conversation. Used by the API to return
 // `GET /api/notebooks/:id/messages` to the web client and by the front-end
