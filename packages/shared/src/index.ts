@@ -161,6 +161,7 @@ export const StudioTemplateSchema = z.enum([
   'executive_summary',
   'timeline',
   'contradictions',
+  'flashcards',
 ]);
 export type StudioTemplate = z.infer<typeof StudioTemplateSchema>;
 
@@ -180,15 +181,42 @@ export type StudioRequest = z.infer<typeof StudioRequestSchema>;
 
 /** Persisted shape of a Studio artifact's metadata. Mirrors the
  *  AudioOverviewMeta pattern so the Artifacts panel can render
- *  different artifact kinds uniformly. */
+ *  different artifact kinds uniformly.
+ *
+ *  - For free-form reports (faq / executive_summary / timeline /
+ *    contradictions) the body is markdown in `artifact.contentMd`.
+ *  - For `flashcards` the body is JSON in `artifact.contentMd`
+ *    (a `FlashcardSet` serialised as JSON) and `flashcardCount`
+ *    is duplicated for fast list rendering. */
 export const StudioReportMetaSchema = z.object({
   template: StudioTemplateSchema,
   /** Total citation chunks the template was grounded on. */
   citationCount: z.number().int().min(0),
   /** When the artifact was first created (ISO). */
   createdAt: z.string(),
+  /** Only set when template='flashcards'. Mirrors the parsed count
+   *  so the Artifacts panel can render the count without parsing
+   *  the JSON body. */
+  flashcardCount: z.number().int().min(0).optional(),
 });
 export type StudioReportMeta = z.infer<typeof StudioReportMetaSchema>;
+
+/** A single Q/A card. Short question, short answer (1-3 sentences),
+ *  optional [N] markers in either field. */
+export const FlashcardSchema = z.object({
+  id: z.string(),
+  question: z.string().min(1).max(500),
+  answer: z.string().min(1).max(1500),
+});
+export type Flashcard = z.infer<typeof FlashcardSchema>;
+
+/** Persisted as JSON in `artifact.contentMd` when the artifact
+ *  kind is 'flashcards'. Order is the natural study order (the
+ *  order the model produced). */
+export const FlashcardSetSchema = z.object({
+  cards: z.array(FlashcardSchema).min(1).max(60),
+});
+export type FlashcardSet = z.infer<typeof FlashcardSetSchema>;
 
 /** SSE delta. Mirrors chat and audio overview patterns so the client
  *  stream helper is reusable. */

@@ -76,7 +76,7 @@ afterAll(async () => {
 });
 
 describe('GET /api/notebooks/:id/studio/templates', () => {
-  it('returns the four documented templates with id, title, blurb, defaultTopK', async () => {
+  it('returns the documented templates with id, title, blurb, defaultTopK', async () => {
     const app = await env.getApp();
     const res = await app.inject({
       method: 'GET',
@@ -84,9 +84,15 @@ describe('GET /api/notebooks/:id/studio/templates', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { templates: Array<{ id: string; title: string; blurb: string; defaultTopK: number }> };
-    expect(body.templates).toHaveLength(4);
+    expect(body.templates).toHaveLength(5);
     const ids = body.templates.map((t) => t.id).sort();
-    expect(ids).toEqual(['contradictions', 'executive_summary', 'faq', 'timeline']);
+    expect(ids).toEqual([
+      'contradictions',
+      'executive_summary',
+      'faq',
+      'flashcards',
+      'timeline',
+    ]);
     for (const t of body.templates) {
       expect(typeof t.title).toBe('string');
       expect(t.title.length).toBeGreaterThan(0);

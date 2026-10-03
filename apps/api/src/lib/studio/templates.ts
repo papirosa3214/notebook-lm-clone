@@ -1,4 +1,5 @@
 import type { CitationChunk, StudioTemplate } from '@notebook/shared';
+import { nanoid } from 'nanoid';
 
 /**
  * One Studio report template. Each template owns:
@@ -123,6 +124,33 @@ const TEMPLATES: Record<StudioTemplate, StudioTemplateDef> = {
         '  - **Позиция B:** что говорит источник [M] (M ≠ N), с короткой цитатой или пересказом.',
         '  - **Контекст:** почему это расхождение может быть — разные методологии, даты, определения, etc.',
         'Если противоречий нет — единственная секция `## Итог` с текстом "Источники согласованы по ключевым вопросам".',
+        '## Источники',
+        sourcesBlock,
+      ].join('\n') + extra;
+    },
+  },
+
+  flashcards: {
+    id: 'flashcards',
+    title: 'Flashcards',
+    blurb: '10-20 пар вопрос-ответ для интервального повторения.',
+    defaultTopK: 12,
+    systemInstructions: STUDIO_PREAMBLE,
+    // The flashcards template is special: the LLM must emit
+    // machine-parseable JSON instead of free-form markdown, because
+    // the client renders the result as a flip-card deck. The studio
+    // route post-processes the streamed text by extracting the first
+    // JSON array (tolerating ```json fences and trailing junk) and
+    // re-renders it as FlashcardSet JSON for `artifact.contentMd`.
+    userPrompt: ({ focus, sourcesBlock }) => {
+      const extra = focus ? `\n\nДоп. акцент: ${focus}` : '';
+      return [
+        'Сгенерируй 10-20 пар вопрос-ответ для самопроверки по этим источникам.',
+        'Пиши СТРОГО в JSON-массиве, без пояснений и без markdown-обёрток. Каждый элемент:',
+        '  {"question": "...короткий вопрос (1 предложение)...", "answer": "...короткий ответ (1-3 предложения)..."}',
+        'Можно ссылаться на источники в ответе через [N]-маркеры.',
+        'Избегай trivially-obvious вопросов ("что такое X" когда ответ тоже "X").',
+        'Сортируй от фундаментальных к частным.',
         '## Источники',
         sourcesBlock,
       ].join('\n') + extra;

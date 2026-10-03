@@ -2,11 +2,14 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import {
+  FlashcardSetSchema,
   StudioDeltaSchema,
   StudioRequestSchema,
   type CitationChunk,
+  type Flashcard,
   type StudioReportMeta,
 } from '@notebook/shared';
+import { nanoid as makeFlashcardId } from 'nanoid';
 import { getDb } from '../db/index.js';
 import { artifacts, notebooks, sources } from '../db/schema.js';
 import { retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
@@ -171,23 +174,37 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
           }
           if (ev.done) break;
         }
+
         // Persist the artifact. We don't apply the chat-route
         // sanitiser here: the Studio context is structured (FAQ / TL;DR
         // / Timeline / Contradictions), not free-form chat, and a
         // stray [N] is the model's responsibility per the template's
         // strict instructions. If you change that, the same
         // sanitizeCitations helper from shared/providers applies.
+        //
+        // For `flashcards` we additionally parse the LLM output as
+        // JSON and persist a `FlashcardSet` so the client can render
+        // an interactive deck without re-parsing markdown.
         const meta: StudioReportMeta = {
           template: template.id,
           citationCount: citations.length,
           createdAt: new Date().toISOString(),
         };
+        let persistedBody: string;
+        if (template.id === 'flashcards') {
+          const cards = parseFlashcardStream(textBuf);
+          const set = FlashcardSetSchema.parse({ cards });
+          meta.flashcardCount = set.cards.length;
+          persistedBody = JSON.stringify(set);
+        } else {
+          persistedBody = textBuf;
+        }
         db.insert(artifacts)
           .values({
             id: artifactId,
             notebookId: req.params.id,
             title: `${template.title}`,
-            contentMd: textBuf,
+            contentMd: persistedBody,
             kind: 'report',
             meta: JSON.stringify(meta),
           })
@@ -209,3 +226,66 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
 // mapping without going through the chat route.
 export const _mapChunk = mapChunk;
 export type { RetrievalChunk };
+
+/**
+ * Parse the streamed LLM output as a list of {question, answer} pairs.
+ *
+ * The model is told to emit a raw JSON array; we tolerate a few
+ * real-world failures: trailing junk after the array, ```json fences,
+ * unquoted keys, and a leading "вот ваши карточки:" preamble. If the
+ * first parse attempt fails we look for a `[`/`]` pair and retry
+ * just that slice.
+ */
+export function parseFlashcardStream(text: string): Flashcard[] {
+  const trimmed = text.trim();
+  const candidates: string[] = [trimmed];
+
+  // Fenced JSON
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) candidates.push(fence[1] ?? '');
+
+  // First '[' to last ']' slice, if any.
+  const firstBracket = trimmed.indexOf('[');
+  const lastBracket = trimmed.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    candidates.push(trimmed.slice(firstBracket, lastBracket + 1));
+  }
+
+  for (const candidate of candidates) {
+    const cards = tryParseFlashcardArray(candidate);
+    if (cards.length > 0) return cards;
+  }
+  return [];
+}
+
+function tryParseFlashcardArray(raw: string): Flashcard[] {
+  // Strip a single C++/JS-style line comment and BOM, but otherwise
+  // hand the text to JSON.parse.
+  const cleaned = raw
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .map((l) => l.replace(/\/\/.*$/, '').trimEnd())
+    .filter((l) => l.length > 0)
+    .join('\n');
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: Flashcard[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) continue;
+    const o = item as { question?: unknown; answer?: unknown };
+    if (typeof o.question !== 'string' || typeof o.answer !== 'string') continue;
+    const q = o.question.trim();
+    const a = o.answer.trim();
+    if (!q || !a) continue;
+    out.push({ id: makeFlashcardId(8), question: q, answer: a });
+    if (out.length >= 60) break;
+  }
+  return out;
+}

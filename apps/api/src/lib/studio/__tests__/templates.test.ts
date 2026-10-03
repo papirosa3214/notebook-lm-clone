@@ -37,9 +37,15 @@ const SAMPLE_CITATIONS: CitationChunk[] = [
 ];
 
 describe('studio templates', () => {
-  it('exposes exactly the four documented templates', () => {
+  it('exposes the documented templates', () => {
     const ids = listTemplates().map((t) => t.id).sort();
-    expect(ids).toEqual(['contradictions', 'executive_summary', 'faq', 'timeline']);
+    expect(ids).toEqual([
+      'contradictions',
+      'executive_summary',
+      'faq',
+      'flashcards',
+      'timeline',
+    ]);
   });
 
   it('every template has a non-empty title, blurb, system instructions, and userPrompt', () => {
