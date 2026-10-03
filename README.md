@@ -103,10 +103,21 @@ YouTube URL → yt-dlp audio → ffmpeg → 16k wav → whisper.cpp --server →
    Если embed() бросил (Ollama рестартует, нет сети) — dense-ветка возвращает
    пустой массив, и retrieval остаётся на FTS5-результатах. Чат не «пустеет».
 3. FTS5-ветка: `bm25(chunks_fts) ORDER BY bm25_score LIMIT ?`.
-4. RRF-merge двух веток → top-K → `rerank()` → `CitationChunk[]`.
-5. System prompt: `CITATION_INSTRUCTIONS` + пронумерованные источники.
-6. LLM provider стримит ответ через SSE: `citations` → `token`×N → `done`.
-7. LLM обязана возвращать `[N]`-маркеры в тексте — клиент рендерит как чипы.
+4. RRF-merge двух веток → top-16 → `RerankProvider.rerank()` → top-K.
+5. `RerankProvider` — pluggable (env `RERANK_PROVIDER`):
+   - `llm` (default) — qwen3.6 / Haiku ставит score 0-10 каждому кандидату.
+   - `http` — POST /rerank на TEI / FlagEmbedding / Infinity
+     (bge-reranker-v2-m3). ~10× быстрее, требует отдельного сервиса.
+   - `noop` — pass-through, только RRF.
+   Все best-effort: на любой ошибке провайдер возвращает input order.
+6. System prompt: `CITATION_INSTRUCTIONS` + пронумерованные источники.
+7. LLM provider стримит ответ через SSE: `citations` → `token`×N → `done`.
+8. После стрима `sanitizeCitations(textBuf, citations.length)` — backstop,
+   чтобы out-of-range `[N]` в persisted-строке был заменён на `[?]`.
+   UNSUPPORTED-ответы (LLM сказала «не знаю») сохраняются verbatim.
+9. LLM обязана возвращать `[N]`-маркеры в тексте — клиент рендерит
+   как чипы. Hover/focus на чипе показывает popover с snippet
+   (CitationChip); на touch — клик открывает `CitationDialog`.
 
 ### Retrieval + Chat
 
@@ -218,3 +229,24 @@ data: {"type":"done","messageId":"abc123"}\n\n
     пор догрузились
   - `pnpm test` зелёный: 12 shared + 23 api + 40 web (см. HANDOFF для
     точного списка)
+- [x] **Milestone A: verified answering + pluggable rerank + citation popover** (`55997a2`..`28764df`):
+  - `packages/shared` — ужесточённый `CITATION_INSTRUCTIONS`,
+    `UNSUPPORTED_PREFIX`, `sanitizeCitations(text, count)`,
+    `isUnsupported()`. 6 unit-тестов.
+  - `apps/api/src/routes/chat.ts` — post-stream sanitiser. В стрим
+    идёт as-is, в БД кладётся sanitised (без визуальных скачков
+    в UI). UNSUPPORTED-ответы сохраняются verbatim, чтобы UI
+    показал «verified no-answer». 4 e2e теста.
+  - `apps/api/src/lib/rerank/` — `RerankProvider` interface +
+    `LlmRerankProvider` (default), `HttpRerankProvider` (POST
+    /rerank на TEI / FlagEmbedding / Infinity — bge-reranker-v2-m3),
+    `NoopRerankProvider` (pass-through). Factory по env
+    `RERANK_PROVIDER`. 18 unit-тестов.
+  - `apps/web/src/components/CitationChip.tsx` — popover на чипе
+    `[N]` с source title + location + 240-символьный snippet +
+    кнопка «Открыть». Touch-устройства: popover подавлен, клик
+    идёт в `CitationDialog`. 5 unit-тестов (jsdom +
+    @testing-library/jest-dom).
+  - `apps/web/src/styles.css` — `.chip-muted` для orphan-маркеров
+    (sanitiser пропустил `[?]`).
+  - `pnpm test` зелёный: 18 shared + 45 api + 45 web.

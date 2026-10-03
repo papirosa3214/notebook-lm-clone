@@ -38,41 +38,44 @@ P2 — polish и расширения:
 **Цель:** ответы чата должны быть действительно grounded в источниках, и
 retrieval должен уметь ранжировать выше по смыслу, а не по embedding distance.
 
-### A1. Verified answering (P0, M)
-- `packages/shared/src/providers.ts` — `CITATION_INSTRUCTIONS` уже есть;
-  добавить:
-  - «If the provided chunks do NOT contain the answer, reply exactly
-    `UNSUPPORTED: <short reason>` and nothing else. Do NOT invent citations.»
-  - «You may use at most N citations, where N is the number of provided
-    chunks. Indices are 1-based and must be within range.»
+### A1. Verified answering (P0, M) — **сделано** (коммиты `55997a2`, `fef5618`, `c1e2183`)
+- `packages/shared/src/providers.ts` — `CITATION_INSTRUCTIONS` ужесточён,
+  добавлен `UNSUPPORTED_PREFIX` + `sanitizeCitations(text, count)`,
+  `isUnsupported()`.
 - `apps/api/src/routes/chat.ts` — после стрима финальный текст через
-  sanitiser: regex `\[(\d+)\]` → проверить ≤ `citations.length`, иначе
-  заменить на `[?]` (UI не должен врать).
-- Тесты: `UNSUPPORTED:` сохраняется as-is; `[5]` при 2 citations заменяется.
+  sanitiser, в БД кладётся sanitised (без визуальных скачков в UI).
+- UNSUPPORTED-ответы сохраняются verbatim, чтобы UI показал
+  «verified no-answer».
+- Тесты: 6 unit в shared, 4 e2e в `chat-sanitize.smoke.test.ts`.
 
-### A2. bge-reranker-v2-m3 (P0, M)
-- `apps/api/src/vectordb/rerank.ts` — новый `rerankProvider`-интерфейс
-  с двумя реализациями:
-  - `OllamaRerank` (если `RERANK_BASE_URL` указывает на Ollama и модель
-    есть) — POST на `/api/rerank` (Ollama-совместимый формат).
-  - `NoopRerank` (если модель не настроена) — pass-through, RRF-merge
-    остаётся финальным ранкером.
-- В `retrieve()` после dense+lexical — вызвать rerank, если он включён.
-- Constraints: на `.110` нет egress к huggingface.co; модель должна быть
-  предзагружена. Иначе rerank-ветка отключается автоматически.
-- Тесты: rerank детерминированно переставляет порядок; NoopRerank
-  не меняет порядок.
+### A2. Pluggable rerank (P0, M) — **сделано** (коммиты `517549e`, `28764df`)
+- `apps/api/src/lib/rerank/` — `RerankProvider` интерфейс +
+  три реализации: `LlmRerankProvider` (default, через чат-LLM),
+  `HttpRerankProvider` (POST /rerank на TEI / FlagEmbedding /
+  Infinity — bge-reranker-v2-m3 живёт там), `NoopRerankProvider`
+  (pass-through).
+- Factory `getRerankProvider()` по env `RERANK_PROVIDER`:
+  `llm` (default) | `http` | `noop`. `RERANK_HTTP_URL`,
+  `RERANK_HTTP_MODEL`, `RERANK_TIMEOUT_MS` для http-ветки.
+- Все best-effort: при ошибке провайдер возвращает input order.
+- `retrieveWithRerank()` использует factory.
+- Constraint из плана (нет egress к HF на `.110`) решён: модель
+  должна быть предзагружена на отдельном TEI-сервисе, никакого
+  pull в момент чата.
+- Тесты: 14 в `rerank.providers.test.ts` (TEI shape, fallback'и,
+  parseScoreArray), 4 в `factory.test.ts` (env-выбор, cache).
 
-### A3. Inline citation hover preview (P0, S)
-- `apps/web/src/components/ChatPanel.tsx` — popover на чипе `[N]`
-  с source title + ~200 символов из `chunk.text` + кнопка
-  «Открыть источник» (та же навигация, что в `CitationDialog`).
-- На mobile — оставляем существующий `CitationDialog` (popover там
-  неудобен).
-- Без бэкенд-изменений: данные уже в `CitationChunk[]`.
+### A3. Inline citation hover preview (P0, S) — **сделано** (`1e80e28`)
+- `apps/web/src/components/CitationChip.tsx` — popover с source title,
+  location, snippet до 240 символов, кнопка «Открыть».
+- `matchMedia('(hover: hover)')` — на touch-устройствах popover
+  подавлен, клик идёт в `CitationDialog` (старое поведение).
+- `chip-muted` для orphan-маркеров (когда sanitiser пропустил `[?]`).
+- 5 unit-тестов в `CitationChip.test.tsx`.
 
-**DoD:** в чате видно `[1]`, hover показывает title и snippet, клик
-проваливается в `SourceDetailSheet` с подсвеченным чанком.
+**DoD всего Milestone A выполнен:** verified answer → либо корректный
+grounded с цитатами, либо явный UNSUPPORTED; rerank pluggable;
+hover popover показывает snippet + кнопку перехода в source reader.
 
 ---
 
