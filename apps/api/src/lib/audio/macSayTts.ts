@@ -1,14 +1,22 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TtsProvider, TtsRequest, TtsResult } from './tts.js';
 
-const SAY_BIN = '/usr/bin/say';
-const FFMPEG_BIN = 'ffmpeg';
+const DEFAULT_SAY_BIN = '/usr/bin/say';
+const DEFAULT_FFMPEG_BIN = 'ffmpeg';
 
 const PER_LINE_TIMEOUT_MS = 30_000;
 const TOTAL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Spawnable child-process factory. Tests override to inject
+ *  deterministic behaviour without actually shelling out.
+ *  The return type is intentionally `any`-shaped so test mocks
+ *  don't need to implement every event emitter method. */
+export type SpawnFn = (cmd: string, args: string[], opts: {
+  stdio: ['ignore', 'pipe', 'pipe'];
+}) => unknown;
 
 /**
  * macOS `say` TTS provider.
@@ -34,6 +42,15 @@ const TOTAL_TIMEOUT_MS = 5 * 60 * 1000;
  */
 export class MacSayTtsProvider implements TtsProvider {
   readonly id = 'mac-say';
+  private readonly sayBin: string;
+  private readonly ffmpegBin: string;
+  private readonly spawn: SpawnFn;
+
+  constructor(opts?: { sayBin?: string; ffmpegBin?: string; spawn?: SpawnFn }) {
+    this.sayBin = opts?.sayBin ?? DEFAULT_SAY_BIN;
+    this.ffmpegBin = opts?.ffmpegBin ?? DEFAULT_FFMPEG_BIN;
+    this.spawn = opts?.spawn ?? ((cmd, args, options) => spawn(cmd, args, options));
+  }
 
   async synthesize(req: TtsRequest): Promise<TtsResult> {
     if (req.lines.length === 0) {
@@ -61,7 +78,7 @@ export class MacSayTtsProvider implements TtsProvider {
           // approximate the pause by routing through ffmpeg's
           // anullsrc filter with a fixed 0.8 s — the LLM is
           // expected to keep STAGE lines short ("Музыкальная пауза").
-          await runFfmpeg(
+          await this.runFfmpeg(
             [
               '-y',
               '-f', 'lavfi',
@@ -83,9 +100,9 @@ export class MacSayTtsProvider implements TtsProvider {
           // the text last; if the LLM emits a stray double-quote the
           // shell would still see it as part of the text because
           // we use spawn (no shell).
-          await runSay(['-v', voice, '-o', aiffPath, line.text], PER_LINE_TIMEOUT_MS);
+          await this.runSay(['-v', voice, '-o', aiffPath, line.text], PER_LINE_TIMEOUT_MS);
           // AIFF → MP3.
-          await runFfmpeg(
+          await this.runFfmpeg(
             [
               '-y',
               '-i', aiffPath,
@@ -106,7 +123,7 @@ export class MacSayTtsProvider implements TtsProvider {
       const listBody = chunks.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
       await writeFile(listPath, listBody, 'utf8');
 
-      await runFfmpeg(
+      await this.runFfmpeg(
         [
           '-y',
           '-f', 'concat',
@@ -142,58 +159,52 @@ export class MacSayTtsProvider implements TtsProvider {
       await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
-}
 
-function runSay(args: string[], timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(SAY_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    proc.stderr.on('data', (b) => (stderr += b.toString()));
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`say timeout ${timeoutMs}ms (${stderr.slice(0, 200)})`));
-    }, timeoutMs);
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`say spawn failed: ${err.message} (${SAY_BIN} present?)`));
+  private runSay(args: string[], timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = this.spawn(this.sayBin, args, { stdio: ['ignore', 'pipe', 'pipe'] }) as ReturnType<typeof spawn>;
+      let stderr = '';
+      if (proc.stderr) proc.stderr.on('data', (b: Buffer) => (stderr += b.toString()));
+      const timer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        reject(new Error(`say timeout ${timeoutMs}ms (${stderr.slice(0, 200)})`));
+      }, timeoutMs);
+      proc.on('error', (err: Error) => {
+        clearTimeout(timer);
+        reject(new Error(`say spawn failed: ${err.message} (${this.sayBin} present?)`));
+      });
+      proc.on('close', (code: number | null) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`say exited ${code}: ${stderr.slice(0, 300)}`));
+        }
+      });
     });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`say exited ${code}: ${stderr.slice(0, 300)}`));
-      }
-    });
-  });
-}
+  }
 
-function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    proc.stderr.on('data', (b) => (stderr += b.toString()));
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`ffmpeg timeout ${timeoutMs}ms`));
-    }, timeoutMs);
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`ffmpeg spawn failed: ${err.message}`));
+  private runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = this.spawn(this.ffmpegBin, args, { stdio: ['ignore', 'pipe', 'pipe'] }) as ReturnType<typeof spawn>;
+      let stderr = '';
+      if (proc.stderr) proc.stderr.on('data', (b: Buffer) => (stderr += b.toString()));
+      const timer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        reject(new Error(`ffmpeg timeout ${timeoutMs}ms`));
+      }, timeoutMs);
+      proc.on('error', (err: Error) => {
+        clearTimeout(timer);
+        reject(new Error(`ffmpeg spawn failed: ${err.message}`));
+      });
+      proc.on('close', (code: number | null) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-400)}`));
+        }
+      });
     });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-400)}`));
-      }
-    });
-  });
-}
-
-/** Read the entire MP3 file into a Buffer. Used by tests to
- *  verify the provider wrote something without parsing audio. */
-export async function readMp3(path: string): Promise<Buffer> {
-  return readFile(path);
+  }
 }

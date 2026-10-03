@@ -26,7 +26,7 @@ beforeEach(() => {
 describe('SuggestionsChips', () => {
   it('shows a loading placeholder until the suggestions arrive', () => {
     // Block the fetch so loading state is visible.
-    let resolveFetch: ((v: Response) => void) | null = null;
+    let resolveFetch!: (v: Response) => void;
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
       () =>
         new Promise<Response>((resolve) => {
@@ -42,7 +42,7 @@ describe('SuggestionsChips', () => {
       />,
     );
     expect(screen.getByTestId('suggestions-loading')).toBeInTheDocument();
-    if (resolveFetch) resolveFetch(sseResponse([{ type: 'suggestions', suggestions: ['q1'] }]));
+    resolveFetch(sseResponse([{ type: 'suggestions', suggestions: ['q1'] }]));
   });
 
   it('renders one chip per suggestion once the SSE delivers the list', async () => {
