@@ -253,6 +253,44 @@ export const StudioDeltaSchema = z.discriminatedUnion('type', [
 ]);
 export type StudioDelta = z.infer<typeof StudioDeltaSchema>;
 
+// === Suggested follow-up questions ========================================
+// Streamed after each chat answer. The LLM is asked to produce
+// 3 short Russian questions that would naturally extend the
+// current thread, grounded in the same sources.
+
+export const SuggestionsRequestSchema = z.object({
+  /** The last user question. Required. */
+  question: z.string().min(1),
+  /** The assistant's last answer. Required. */
+  answer: z.string().min(1),
+  /** Optional chat history (user/assistant turns) to give the LLM
+   *  context about the running conversation. */
+  history: z.array(ChatMessageSchema).max(20).optional(),
+  /** Source scope (mirrors /chat). When set, the LLM is told which
+   *  sources the previous answer used so suggestions stay on-topic. */
+  sourceIds: z.array(z.string().min(1)).max(50).optional(),
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+  /** How many suggestions to ask for. 1-5, default 3. */
+  count: z.number().int().min(1).max(5).default(3),
+});
+export type SuggestionsRequest = z.infer<typeof SuggestionsRequestSchema>;
+
+/**
+ * SSE delta for the suggestions endpoint. The model streams the
+ * raw text of the JSON array; the client (and the test suite) parses
+ * the same way we already do for flashcards/data_table.
+ */
+export const SuggestionsDeltaSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('token'), text: z.string() }),
+  /** Final list, parsed on the server after the stream ends so
+   *  clients don't need to JSON-parse. */
+  z.object({ type: z.literal('suggestions'), suggestions: z.array(z.string().min(1)) }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('done') }),
+]);
+export type SuggestionsDelta = z.infer<typeof SuggestionsDeltaSchema>;
+
 // === Sharing =============================================================
 // Read-only public link to a notebook. Single-user assumption: the
 // share token is a long random nanoid that the holder can use to

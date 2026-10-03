@@ -51,6 +51,14 @@ const schema = z.object({
   // configuring it. In Coolify / production set this to the public
   // origin (e.g. https://notebook.example.com).
   PUBLIC_BASE_URL: z.string().optional(),
+
+  // Suggested follow-up questions after a chat answer. Off by
+  // default in tests (faster) and on by default in dev/prod.
+  // Set to 'false' on weak hardware to skip the second LLM call.
+  SUGGESTIONS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 const parsed = schema.safeParse(process.env);

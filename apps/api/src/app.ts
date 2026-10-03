@@ -16,6 +16,7 @@ import { audioOverviewRoutes } from './routes/audioOverview.js';
 import { studioRoutes } from './routes/studio.js';
 import { shareRoutes } from './routes/share.js';
 import { exportRoutes } from './routes/export.js';
+import { suggestionRoutes } from './routes/suggestions.js';
 
 /**
  * Construct the Fastify app without binding to a port. The production
@@ -55,6 +56,7 @@ export async function buildApp(
   await app.register(studioRoutes);
   await app.register(shareRoutes);
   await app.register(exportRoutes);
+  await app.register(suggestionRoutes);
 
   return app;
 }
