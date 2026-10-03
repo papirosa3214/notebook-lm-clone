@@ -41,6 +41,7 @@ describe('studio templates', () => {
     const ids = listTemplates().map((t) => t.id).sort();
     expect(ids).toEqual([
       'contradictions',
+      'data_table',
       'executive_summary',
       'faq',
       'flashcards',

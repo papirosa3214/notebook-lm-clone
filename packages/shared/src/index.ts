@@ -162,6 +162,7 @@ export const StudioTemplateSchema = z.enum([
   'timeline',
   'contradictions',
   'flashcards',
+  'data_table',
 ]);
 export type StudioTemplate = z.infer<typeof StudioTemplateSchema>;
 
@@ -198,6 +199,10 @@ export const StudioReportMetaSchema = z.object({
    *  so the Artifacts panel can render the count without parsing
    *  the JSON body. */
   flashcardCount: z.number().int().min(0).optional(),
+  /** Only set when template='data_table'. Mirrors the parsed
+   *  column/row counts. */
+  columnCount: z.number().int().min(0).optional(),
+  rowCount: z.number().int().min(0).optional(),
 });
 export type StudioReportMeta = z.infer<typeof StudioReportMetaSchema>;
 
@@ -217,6 +222,26 @@ export const FlashcardSetSchema = z.object({
   cards: z.array(FlashcardSchema).min(1).max(60),
 });
 export type FlashcardSet = z.infer<typeof FlashcardSetSchema>;
+
+/** Persisted as JSON in `artifact.contentMd` when the artifact
+ *  kind is 'report' and meta.template is 'data_table'.
+ *
+ *  - `columns` is the ordered header list. Each row's keys must
+ *    be a subset of this list (extra keys are dropped, missing
+ *    cells become '').
+ *  - `rows` are plain objects keyed by column name. Values are
+ *    short strings — the model is told to keep them under ~200
+ *    chars so the table renders without horizontal scroll.
+ *  - `title` is optional and shown above the table when set. */
+export const DataTableSchema = z.object({
+  title: z.string().max(200).optional(),
+  columns: z.array(z.string().min(1).max(80)).min(1).max(20),
+  rows: z
+    .array(z.record(z.string(), z.string()))
+    .min(1)
+    .max(500),
+});
+export type DataTable = z.infer<typeof DataTableSchema>;
 
 /** SSE delta. Mirrors chat and audio overview patterns so the client
  *  stream helper is reusable. */

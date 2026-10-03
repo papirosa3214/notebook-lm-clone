@@ -2,10 +2,12 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import {
+  DataTableSchema,
   FlashcardSetSchema,
   StudioDeltaSchema,
   StudioRequestSchema,
   type CitationChunk,
+  type DataTable,
   type Flashcard,
   type StudioReportMeta,
 } from '@notebook/shared';
@@ -196,6 +198,18 @@ export const studioRoutes: FastifyPluginAsync = async (app) => {
           const set = FlashcardSetSchema.parse({ cards });
           meta.flashcardCount = set.cards.length;
           persistedBody = JSON.stringify(set);
+        } else if (template.id === 'data_table') {
+          const table = parseDataTableStream(textBuf);
+          // Empty-table fallback: if the model didn't emit valid
+          // JSON, persist a one-column "Нет данных" row so the user
+          // sees something rather than a broken renderer.
+          const safe: DataTable = table ?? {
+            columns: ['Результат'],
+            rows: [{ Результат: 'Нет данных' }],
+          };
+          meta.columnCount = safe.columns.length;
+          meta.rowCount = safe.rows.length;
+          persistedBody = JSON.stringify(safe);
         } else {
           persistedBody = textBuf;
         }
@@ -288,4 +302,101 @@ function tryParseFlashcardArray(raw: string): Flashcard[] {
     if (out.length >= 60) break;
   }
   return out;
+}
+
+/**
+ * Parse the streamed LLM output as a DataTable.
+ *
+ * The model is told to emit a single JSON object of the form
+ * {title?, columns: string[], rows: Array<Record<string,string>>}.
+ * Like `parseFlashcardStream` we tolerate fence wrappers and
+ * surrounding prose, then validate via the DataTable schema.
+ *
+ * Returns `null` on total failure (no JSON object at all) so the
+ * caller can fall back to a one-row "Нет данных" placeholder
+ * rather than 500-ing the user.
+ */
+export function parseDataTableStream(text: string): DataTable | null {
+  const trimmed = text.trim();
+  const candidates: string[] = [trimmed];
+
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) candidates.push(fence[1] ?? '');
+
+  // First '{' to last '}' slice — the typical wrapping case.
+  const first = trimmed.indexOf('{');
+  const last = trimmed.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    candidates.push(trimmed.slice(first, last + 1));
+  }
+
+  for (const candidate of candidates) {
+    const obj = tryParseDataTableObject(candidate);
+    if (obj) return obj;
+  }
+  return null;
+}
+
+function tryParseDataTableObject(raw: string): DataTable | null {
+  const cleaned = raw
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .map((l) => l.replace(/\/\/.*$/, '').trimEnd())
+    .filter((l) => l.length > 0)
+    .join('\n');
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const o = parsed as {
+    title?: unknown;
+    columns?: unknown;
+    rows?: unknown;
+  };
+  if (typeof o.columns !== 'object' || !Array.isArray(o.columns)) return null;
+  if (typeof o.rows !== 'object' || !Array.isArray(o.rows)) return null;
+
+  // Normalize columns: trim, drop empties, dedupe (first wins), cap at 20.
+  const seen = new Set<string>();
+  const columns: string[] = [];
+  for (const c of o.columns) {
+    if (typeof c !== 'string') continue;
+    const t = c.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    columns.push(t);
+    if (columns.length >= 20) break;
+  }
+  if (columns.length === 0) return null;
+
+  // Normalize rows: keep only cells whose key is in `columns`, coerce
+  // values to strings, drop empty rows, cap at 500.
+  const rows: Array<Record<string, string>> = [];
+  for (const r of o.rows) {
+    if (typeof r !== 'object' || r === null) continue;
+    const src = r as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    let hasAny = false;
+    for (const col of columns) {
+      const v = src[col];
+      if (v == null) continue;
+      const s = typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+      if (s.length > 0) {
+        out[col] = s;
+        hasAny = true;
+      }
+    }
+    if (hasAny) {
+      rows.push(out);
+      if (rows.length >= 500) break;
+    }
+  }
+  if (rows.length === 0) return null;
+
+  const title = typeof o.title === 'string' ? o.title.trim().slice(0, 200) : undefined;
+  return title ? { title, columns, rows } : { columns, rows };
 }

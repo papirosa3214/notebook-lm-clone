@@ -156,6 +156,39 @@ const TEMPLATES: Record<StudioTemplate, StudioTemplateDef> = {
       ].join('\n') + extra;
     },
   },
+
+  data_table: {
+    id: 'data_table',
+    title: 'Data Table',
+    blurb: 'Сравнительная таблица: сущности × атрибуты, с сортировкой и фильтром.',
+    defaultTopK: 14,
+    systemInstructions: STUDIO_PREAMBLE,
+    // The data_table template is also machine-parseable: the route
+    // extracts the first JSON object of the form {title, columns, rows}
+    // and persists it as a DataTable. The user prompt is strict
+    // about the JSON shape because the client renders a real table
+    // (not markdown) and bad JSON is the #1 way the model can
+    // break this feature.
+    userPrompt: ({ focus, sourcesBlock }) => {
+      const extra = focus ? `\n\nДоп. акцент: ${focus}` : '';
+      return [
+        'Извлеки из источников сравнительную таблицу.',
+        'Пиши СТРОГО один JSON-объект без пояснений и без markdown. Структура:',
+        '  {"title": "...короткий заголовок таблицы...",',
+        '   "columns": ["Колонка 1", "Колонка 2", ...],',
+        '   "rows": [{"Колонка 1": "...", "Колонка 2": "..."}, ...]}',
+        'Требования:',
+        '  - 3-7 колонок, понятные названия без жаргона',
+        '  - 5-30 строк; пропусти единичные записи, для которых нет данных в источниках',
+        '  - значения в ячейках — короткие строки (до ~200 символов), без переносов',
+        '  - первая колонка обычно содержит имя/название, остальные — атрибуты',
+        '  - в любой ячейке можно ссылаться на источники через [N]-маркеры',
+        'Если источники не дают структурируемого материала — верни одну строку с пометкой "Нет данных".',
+        '## Источники',
+        sourcesBlock,
+      ].join('\n') + extra;
+    },
+  },
 };
 
 export function getTemplate(id: StudioTemplate): StudioTemplateDef {

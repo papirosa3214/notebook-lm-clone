@@ -84,10 +84,11 @@ describe('GET /api/notebooks/:id/studio/templates', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { templates: Array<{ id: string; title: string; blurb: string; defaultTopK: number }> };
-    expect(body.templates).toHaveLength(5);
+    expect(body.templates).toHaveLength(6);
     const ids = body.templates.map((t) => t.id).sort();
     expect(ids).toEqual([
       'contradictions',
+      'data_table',
       'executive_summary',
       'faq',
       'flashcards',
