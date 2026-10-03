@@ -276,6 +276,18 @@ export default function NotebookPage() {
             <SparkleIcon size={12} className="text-accent" />
             <span>Поделиться</span>
           </button>
+          <a
+            href={api.exportUrl(notebookId)}
+            // `download` lets the browser save the file with the
+            // server-provided Content-Disposition filename.
+            // Same min-[640px] breakpoint as the other header chips.
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
+            title="Скачать .zip со всеми источниками, артефактами и чатом"
+            data-testid="export-zip"
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Скачать .zip</span>
+          </a>
           <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
             <span>AI-ассистент</span>

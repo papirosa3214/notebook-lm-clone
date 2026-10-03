@@ -233,6 +233,12 @@ export const api = {
   deleteArtifact: (id: string) =>
     http<void>(`/api/artifacts/${id}`, { method: 'DELETE' }),
   artifactDownloadUrl: (id: string) => `/api/artifacts/${id}/download`,
+  // Whole-notebook .zip export (sources + artifacts + chat + README).
+  // The browser saves the file with whatever name the server sets in
+  // Content-Disposition; we still pass the same id through so the
+  // `download` attribute hint can reuse the notebook title client-side
+  // if we want to.
+  exportUrl: (notebookId: string) => `/api/notebooks/${notebookId}/export.zip`,
 
   // providers
   listProviderModels: (id: ProviderId) =>
