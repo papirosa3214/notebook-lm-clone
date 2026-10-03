@@ -13,6 +13,7 @@ import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { AudioOverviewDialog } from '../components/AudioOverviewDialog';
 import { StudioReportDialog } from '../components/StudioReportDialog';
+import { ShareDialog } from '../components/ShareDialog';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
@@ -171,6 +172,7 @@ export default function NotebookPage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showStudioDialog, setShowStudioDialog] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
 
   // Live drag — drives both the visible width (via setLayout) and the
   // persisted layout so a reload keeps the user's choice.
@@ -263,6 +265,16 @@ export default function NotebookPage() {
           >
             <SparkleIcon size={12} className="text-accent" />
             <span>Studio</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowShareDialog(true)}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
+            title="Создать read-only публичную ссылку"
+            data-testid="share-open"
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Поделиться</span>
           </button>
           <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
@@ -526,6 +538,12 @@ export default function NotebookPage() {
         <StudioReportDialog
           notebookId={notebookId}
           onClose={() => setShowStudioDialog(false)}
+        />
+      )}
+      {showShareDialog && (
+        <ShareDialog
+          notebookId={notebookId}
+          onClose={() => setShowShareDialog(false)}
         />
       )}
     </div>

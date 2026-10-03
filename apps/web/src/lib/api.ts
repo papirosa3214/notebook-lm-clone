@@ -10,7 +10,13 @@ import type {
   SearchPreviewResponse,
   Source,
 } from './types';
-import type { AudioOverviewDelta, AudioOverviewLine, AudioOverviewMeta } from '@notebook/shared';
+import type {
+  AudioOverviewDelta,
+  AudioOverviewLine,
+  AudioOverviewMeta,
+  NotebookShare,
+  SharedNotebook,
+} from '@notebook/shared';
 
 class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
@@ -300,7 +306,26 @@ export const api = {
 
   audioUrl: (notebookId: string, artifactId: string) =>
     `/api/audio/${notebookId}/${artifactId}.mp3`,
+
+  // Sharing — owner side. The public side lives in `fetchSharedNotebook`
+  // because it has no auth context and shouldn't be on the same shape
+  // as the rest of the API.
+  getShare: (notebookId: string) =>
+    http<NotebookShare>(`/api/notebooks/${notebookId}/share`),
+  enableShare: (notebookId: string) =>
+    http<NotebookShare>(`/api/notebooks/${notebookId}/share`, { method: 'POST' }),
+  revokeShare: (notebookId: string) =>
+    http<void>(`/api/notebooks/${notebookId}/share`, { method: 'DELETE' }),
 };
+
+/** Public, no-auth snapshot fetch for the /shared/:token viewer page. */
+export async function fetchSharedNotebook(token: string): Promise<SharedNotebook> {
+  const res = await fetch(`/api/shared/${token}`);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return (await res.json()) as SharedNotebook;
+}
 
 export { ApiError };
 export type { ChatDelta };
