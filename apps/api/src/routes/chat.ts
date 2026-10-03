@@ -2,7 +2,12 @@ import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { ChatRequestSchema, ChatDeltaSchema, type CitationChunk } from '@notebook/shared';
-import { CITATION_INSTRUCTIONS, formatContextForPrompt } from '@notebook/shared/providers';
+import {
+  CITATION_INSTRUCTIONS,
+  formatContextForPrompt,
+  isUnsupported,
+  sanitizeCitations,
+} from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
 import { notebooks, messages, sources } from '../db/schema.js';
 import { retrieve, retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
@@ -217,20 +222,45 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         }
         if (ev.done) break;
       }
+      // Verified-answering post-processing: the model already saw a strict
+      // CITATION_INSTRUCTIONS prompt that forbids invented [N] markers, but
+      // we still defensively run `sanitizeCitations` on the final buffer
+      // before persisting. Anything the model wrote that points at a chunk
+      // it was never shown becomes `[?]` in the database — and therefore in
+      // the next `GET /messages` reply — even if the user already saw the
+      // un-sanitised version during streaming.
+      //
+      // We deliberately do NOT try to rewrite the user's screen mid-stream
+      // (no DOM patches, no replacement tokens): the prompt is the
+      // primary defence, this is a backstop.
+      const sanitised = isUnsupported(textBuf)
+        ? textBuf
+        : sanitizeCitations(textBuf, citations.length);
+      if (sanitised !== textBuf) {
+        req.log.info(
+          { before: textBuf.length, after: sanitised.length, citations: citations.length },
+          'citation sanitiser rewrote streamed text before persisting',
+        );
+      }
       send({ type: 'done', messageId });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       // Persist assistant turn (full text + citations) regardless of whether
       // streaming succeeded — errors are visible as completed rows with err
-      // text rather than silently missing turns.
+      // text rather than silently missing turns. Use the sanitised buffer
+      // so DB reads (`GET /messages`) never expose a `[N]` outside the
+      // supplied citation range.
+      const persisted = isUnsupported(textBuf)
+        ? textBuf
+        : sanitizeCitations(textBuf, citations.length);
       try {
         db.insert(messages)
           .values({
             id: assistantTurnId,
             notebookId: req.params.id,
             role: 'assistant',
-            content: textBuf,
+            content: persisted,
             citations: JSON.stringify(citations),
             provider: providerId,
             model,
