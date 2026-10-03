@@ -277,12 +277,59 @@ contentMd (markdown для reports, JSON для flashcards/data_table).
 
 ## Milestone E — Mobile PWA (P2, L)
 
-- `manifest.webmanifest` + service worker (Workbox).
-- Install-prompt для iOS Safari.
-- Touch-target ≥ 44 px везде, viewport meta, safe-area-inset.
-- Свайп между панелями (Hammer.js или нативный pointer events).
+### E1. PWA foundation — **сделано** (текущая ветка, 1 коммит)
+- `apps/web/public/manifest.webmanifest`:
+  - name/short_name, `start_url=/`, `display=standalone`
+  - `theme_color` и `background_color` синхронизированы с
+    дизайн-токенами
+  - 2 иконки: `any` (icon.svg) + `maskable` (icon-maskable.svg
+    с 80% safe zone для adaptive icons)
+- `apps/web/public/sw.js`:
+  - Versioned cache (`nb-sw-v1-shell/-runtime`) → deploy эвиктит
+  - App shell pre-cache на install
+  - Stale-while-revalidate для same-origin GETs
+  - Bypass /api/* (chat/search/retrieval никогда не подаём stale),
+    bypass text/event-stream, bypass Vite dev, bypass cross-origin
+  - `skipWaiting()` + `clients.claim()` чтобы deploy сразу
+    активировал новый worker
+- `apps/web/src/pwa.ts`:
+  - `registerServiceWorker()`: idempotent, swallow errors
+  - Только в production (`import.meta.env.PROD`), чтобы HMR
+    в dev не ломал кэш
+  - Test seam: `globalThis.__disableServiceWorker` для vitest
+- `apps/web/index.html`:
+  - `viewport-fit=cover` + `user-scalable=no`
+  - `theme-color` light + dark (prefers-color-scheme)
+  - `apple-mobile-web-app-capable` / `status-bar-style` / `title`
+  - `format-detection=telephone=no` (iOS не превращает числа в ссылки)
+  - `<link rel="manifest">`, `<link rel="icon">` (SVG),
+    `<link rel="apple-touch-icon">`
+- CSS (`apps/web/src/styles.css`):
+  - `.pt-safe` / `.pb-safe` / `.p-safe` (env(safe-area-inset-*))
+  - `.touch-target` (44×44 — WCAG/HIG minimum)
+  - `.no-zoom` (touch-action: manipulation, double-tap zoom off)
+  - `.btn-icon` получает touch-target + no-zoom
+  - `.btn` получает min-h-[36px] + no-zoom
+  - body `overscroll-behavior-y: contain`,
+    `background-color: rgb(--nb-canvas)` (no white flash на
+    overscroll)
+- `apps/web/src/pages/NotebookPage.tsx`:
+  - header получает `pt-safe pl-safe pr-safe`
+- Тесты:
+  - `src/pwa.test.ts` (3) — registerServiceWorker test seams
+  - `public/pwa-files.test.ts` (11) — manifest shape, sw shape,
+    index.html meta — без необходимости поднимать браузер
+
+### E2. Swaip между панелями + mobile polish
+- Hammer.js или нативный pointer events для свайпа между
+  панелями на мобильных.
 - Чистка CSS на основе уже начатого `min-[640px]` брейкпойнта
-  (A1.6 Этапа 9) — сейчас мобильный layout местами недополирован.
+  (A1.6 Этапа 9) — местами мобильный layout ещё недополирован.
+
+**DoD:** «Add to Home Screen» на iOS/Android ставит иконку, открывает
+standalone, корректно обрабатывает safe-area-inset. Service
+worker кэширует app shell для офлайн-первого-старта (API-запросы
+всегда идут на сеть, поэтому деградация чата — на UI уровне).
 
 ---
 

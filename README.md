@@ -79,6 +79,30 @@ pnpm --filter @notebook/api dev      # API на :4001
 pnpm --filter @notebook/web dev      # Web на :5173
 ```
 
+## PWA / мобильное использование
+
+Приложение — прогрессивное веб-приложение: ставится через
+«Add to Home Screen» на iOS/Android и работает в standalone-режиме.
+
+- `public/manifest.webmanifest` — name, theme/background color,
+  `display=standalone`. Две иконки: `any` (icon.svg) +
+  `maskable` (icon-maskable.svg с 80% safe zone для adaptive
+  icons).
+- `public/sw.js` — service worker. Stale-while-revalidate для
+  app shell, **bypass `/api/*`** (chat/search/retrieval никогда
+  не подают stale — лучше ошибка, чем устаревший ответ). Версия
+  кэша инкрементируется в `SW_VERSION`, deploy эвиктит старый.
+- `src/pwa.ts` — `registerServiceWorker()`, idempotent, только
+  в production (чтобы HMR в dev не ломал кэш).
+- iOS meta: `apple-mobile-web-app-capable`, `status-bar-style`,
+  `format-detection=telephone=no`. Viewport: `viewport-fit=cover`.
+- CSS-утилиты: `.p-safe` / `.pt-safe` для safe-area-inset,
+  `.touch-target` (44×44), `.no-zoom` (touch-action: manipulation).
+
+Все API-запросы всегда идут на сеть, поэтому чат и поиск
+деградируют «честно» (UI покажет ошибку при отсутствии связи),
+а не отдают устаревшие ответы.
+
 ## Как это работает
 
 ### Pipeline источника (синхронный, в момент POST)
