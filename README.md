@@ -161,6 +161,25 @@ data: {"type":"token","text":"rie"}\n\n
 data: {"type":"done","messageId":"abc123"}\n\n
 ```
 
+## Audio Overview TTS
+
+Audio Overview script-only mode работает из коробки. Чтобы получить
+**реальный mp3** на этом Mac — включи `mac-say` provider:
+
+```bash
+# apps/api/.env
+TTS_PROVIDER=mac-say
+```
+
+mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/say`
++ `ffmpeg`. Default voice `Milena` (ru_RU). SCRIPT и MIRA говорят
+одним голосом (на macOS нет двух стабильно доступных русских
+голосов). STAGE → 0.8 s silence. Output: 96 kbps mono MP3.
+
+Для разных голосов (будущие провайдеры):
+- `openai` — `OPENAI_API_KEY` (не реализован)
+- `kokoro` — `KOKORO_BASE_URL` (не реализован)
+
 ## API
 
 | Endpoint | Назначение |

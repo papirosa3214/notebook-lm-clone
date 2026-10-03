@@ -106,15 +106,36 @@ hover popover показывает snippet + кнопку перехода в so
   smoke (script-only happy path, unknown sourceIds, bad filename).
 - UI: `AudioOverviewDialog` + кнопка в шапке ноутбука.
 
-### B2. TTS-синтез — **требует решения по провайдеру**
-- Интерфейс `TtsProvider` уже на месте. Когда выберем движок,
-  добавим `OpenAiTtsProvider` / `MacSayTtsProvider` /
-  `KokoroTtsProvider` в `apps/api/src/lib/audio/`. Factory
-  (`TTS_PROVIDER` env) уже умеет резолвить эти имена (сейчас
-  warn+fallback на noop).
-- Склейка: ffmpeg `amix` для двух голосов; mp3 в
-  `apps/api/data/audio/{notebookId}/{artifactId}.mp3`.
-- Выбор сделан: script-only first, реальный TTS — после.
+### B2. TTS-синтез (mac-say) — **сделано** (текущая ветка)
+- `apps/api/src/lib/audio/macSayTts.ts`:
+  - для каждой не-STAGE line: `say -v Milena -o chunk.aiff <text>`
+    → `ffmpeg aiff → mp3 (libmp3lame 96k)`
+  - для STAGE: `ffmpeg anullsrc 0.8s` (silence chunk)
+  - финальный `ffmpeg concat demuxer` склеивает все chunks
+  - голоса: SCRIPT/MIRA default `Milena` (ru_RU),
+    override через `req.voices.{SCRIPT,MIRA}`
+  - 2 spawn-хелпера (runSay, runFfmpeg) с timeout + cleanup
+  - 211 lines, no extra deps
+  - DI через constructor: `{ sayBin?, ffmpegBin?, spawn? }`
+    для тестов
+- `apps/api/src/lib/audio/factory.ts`:
+  - `TTS_PROVIDER=mac-say` → `MacSayTtsProvider`
+  - `openai`/`kokoro` остаются unimplemented (warn+noop)
+- Тесты: 5 unit на `MacSayTtsProvider` (empty lines, SCRIPT/MIRA/STAGE
+  pipeline, voice override, say/ffmpeg error propagation),
+  4 unit на factory (4 провайдера + cache), 1 **реальный** e2e
+  (`audioOverview.tts.test.ts`) — `TTS_PROVIDER=mac-say` →
+  POST `/audio-overview` → mp3 на диске. Skip'ается если
+  `/usr/bin/say` недоступен.
+- Реальный mp3: ID3 v2.4.0 + MPEG ADTS layer III, 96 kbps,
+  22.05 kHz, mono. 3 реплики SCRIPT → 3.4 сек аудио.
+- `apps/api/.env.example`: обновлён — mac-say первым в списке
+  рекомендаций с полным описанием.
+
+**Полный DoD (с TTS) сейчас работает на этом Mac:**
+добавь 3 URL → нажми Audio Overview → через ~30 сек слушаешь
+реальный подкаст двумя голосами (пока одинаковыми) с паузами,
+транскрипт + mp3 в ArtifactsPanel.
 
 ### B3. UI (частично)
 - Кнопка и диалог с прогрессом уже есть (B1).
