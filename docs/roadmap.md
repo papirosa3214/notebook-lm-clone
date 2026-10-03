@@ -139,18 +139,34 @@ hover popover показывает snippet + кнопку перехода в so
 
 ## Milestone C — Studio v1 (P1, L)
 
-### C1. Reports / Briefs
-- `POST /api/notebooks/:id/artifacts/studio` с body `{ template, focus? }`.
-- Шаблоны: FAQ, executive summary, timeline, contradictions.
-- Бэкенд: `retrieve()` + шаблонный промпт → `Artifact { kind: 'report' }`.
+### C1. Reports / Briefs — **сделано** (`eb1fbf7`..`059757e` на текущей ветке)
+- `packages/shared`: `StudioTemplate` (faq | executive_summary |
+  timeline | contradictions), `StudioRequest`, `StudioReportMeta`,
+  `StudioDelta`. Расширен `Artifact.kind` (`'note' | 'audio_overview'
+  | 'report'`).
+- `apps/api/src/lib/studio/templates.ts` — реестр шаблонов с
+  per-template system-prompt + user-prompt factory. Все
+  промпты на русском, [N]-маркеры обязательны, общий preamble
+  затягивает дисциплину (без вводных фраз, без секций вне
+  шаблона, без выдумок).
+- `apps/api/src/routes/studio.ts`:
+  - `GET /api/notebooks/:id/studio/templates` — список для UI
+  - `POST /api/notebooks/:id/artifacts/studio` — SSE: citations →
+    token* → done | error; persist как Artifact `kind='report'`,
+    `meta={template, citationCount, createdAt}`
+- UI: `StudioReportDialog` + кнопка «Studio» в шапке ноутбука.
+- Тесты: 8 на `templates.test.ts` (4 документа, topK диапазон,
+  userPrompt с focus/без), 5 на `studio.smoke.test.ts` (list,
+  happy path, unknown sourceIds, unknown template id, empty
+  notebook).
 
-### C2. Flashcards / Quiz
+### C2. Flashcards / Quiz (следующая итерация)
 - LLM генерирует N пар «вопрос-ответ» (или multiple-choice).
 - Артефакт с `kind: 'flashcards'`.
 - Интерактивный режим в UI: flip card, пометки «знаю / не знаю», прогресс.
 - Persist прогресса в `artifact_progress` таблице.
 
-### C3. Data Table
+### C3. Data Table (следующая итерация)
 - LLM извлекает из источников сущности + атрибуты, форсит markdown-таблицу.
 - `Artifact { kind: 'table' }`, рендерится с фильтрами/сортировкой.
 

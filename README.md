@@ -165,6 +165,8 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `POST /api/notebooks/:id/discover/ingest` | Подтвердить и ингестить preview URL'ы |
 | `GET /api/notebooks/:id/artifacts` | Список артефактов |
 | `POST /api/notebooks/:id/artifacts` | Создать |
+| `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions) |
+| `POST /api/notebooks/:id/artifacts/studio` | Сгенерировать Studio-отчёт (SSE: citations → token* → done), persist `kind='report'` |
 | `GET /api/artifacts/:id` | Прочитать |
 | `PATCH /api/artifacts/:id` | Обновить title/contentMd |
 | `GET /api/artifacts/:id/download` | Скачать как `.md` |
