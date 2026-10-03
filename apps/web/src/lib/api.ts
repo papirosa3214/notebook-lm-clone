@@ -10,6 +10,7 @@ import type {
   SearchPreviewResponse,
   Source,
 } from './types';
+import type { AudioOverviewDelta, AudioOverviewLine, AudioOverviewMeta } from '@notebook/shared';
 
 class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
@@ -227,6 +228,75 @@ export const api = {
   // providers
   listProviderModels: (id: ProviderId) =>
     http<{ provider: ProviderId; default: string; models: string[] }>(`/api/providers/${id}/models`),
+
+  // Audio Overview — kicks off the SSE script-generation job and
+  // streams the lines back. The promise resolves with the final
+  // `{ artifact, meta }` so the caller can navigate to the new
+  // artifact without polling.
+  ingestAudioOverviewStream(
+    notebookId: string,
+    body: { style?: 'deep_dive' | 'short' | 'critique'; focus?: string; sourceIds?: string[] },
+    onDelta: (delta: AudioOverviewDelta) => void,
+  ): { promise: Promise<{ artifact: Artifact; meta: AudioOverviewMeta }>; abort: () => void } {
+    const controller = new AbortController();
+    const promise = (async () => {
+      const res = await fetch(
+        `/api/notebooks/${notebookId}/audio-overview?stream=1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        },
+      );
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let meta: AudioOverviewMeta | null = null;
+      let artifactId: string | null = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n\n')) !== -1) {
+          const block = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          const line = block.split('\n').find((l) => l.startsWith('data:'));
+          if (!line) continue;
+          const json = line.slice(5).trim();
+          if (!json) continue;
+          try {
+            const delta = JSON.parse(json) as AudioOverviewDelta;
+            if (delta.type === 'meta') meta = delta.meta;
+            if (delta.type === 'done') artifactId = delta.artifactId;
+            onDelta(delta);
+            if (delta.type === 'error') {
+              throw new Error(delta.message);
+            }
+          } catch (err) {
+            if (err instanceof Error) throw err;
+            // ignore malformed chunk
+          }
+        }
+      }
+      if (!meta || !artifactId) {
+        throw new Error('stream closed without done event');
+      }
+      // Re-fetch the artifact by id so the client gets the full row
+      // (including the persisted contentMd) in one place.
+      const artifact = await http<Artifact>(`/api/artifacts/${artifactId}`);
+      return { artifact, meta };
+    })();
+    return { promise, abort: () => controller.abort() };
+  },
+
+  audioUrl: (notebookId: string, artifactId: string) =>
+    `/api/audio/${notebookId}/${artifactId}.mp3`,
 };
 
 export { ApiError };

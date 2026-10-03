@@ -11,6 +11,7 @@ import { ChatPanel } from '../components/ChatPanel';
 import { PanelErrorBoundary } from '../components/ErrorBoundary';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
+import { AudioOverviewDialog } from '../components/AudioOverviewDialog';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
@@ -167,6 +168,7 @@ export default function NotebookPage() {
     index: number;
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
+  const [showAudioDialog, setShowAudioDialog] = useState(false);
 
   // Live drag — drives both the visible width (via setLayout) and the
   // persisted layout so a reload keeps the user's choice.
@@ -240,6 +242,16 @@ export default function NotebookPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAudioDialog(true)}
+            disabled={readyCount === 0}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink disabled:opacity-50 min-[640px]:inline-flex"
+            title={readyCount === 0 ? 'Сначала добавьте источники' : 'Сгенерировать двухголосый подкаст по источникам'}
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Audio Overview</span>
+          </button>
           <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
             <span>AI-ассистент</span>
@@ -492,6 +504,12 @@ export default function NotebookPage() {
       })()}
 
       <CommandPalette open={paletteOpen} onClose={() => closePalette(false)} commands={commands} />
+      {showAudioDialog && (
+        <AudioOverviewDialog
+          notebookId={notebookId}
+          onClose={() => setShowAudioDialog(false)}
+        />
+      )}
     </div>
     </SourceScopeProvider>
   );
