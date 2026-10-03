@@ -70,6 +70,15 @@ export const CITATION_INSTRUCTIONS = [
 export const UNSUPPORTED_PREFIX = 'UNSUPPORTED:';
 
 /**
+ * True when `text` is a hard-refusal answer (the model decided no chunk
+ * was enough). The chat route and the web UI both use this to skip
+ * rendering citation chips and to label the row as a verified no-answer.
+ */
+export function isUnsupported(text: string): boolean {
+  return text.startsWith(UNSUPPORTED_PREFIX);
+}
+
+/**
  * Post-process a streamed assistant answer so the user never sees a
  * `[N]` marker pointing at a citation the model was never shown.
  *

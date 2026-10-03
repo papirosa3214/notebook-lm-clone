@@ -23,12 +23,13 @@ describe('sanitizeCitations', () => {
     expect(sanitizeCitations('Plain prose [1] without citations.', 0)).toBe('Plain prose [?] without citations.');
   });
 
-  it('does not rewrite [N] inside code spans or fenced blocks', () => {
-    // We accept that the model can reference `[1]` inside a code sample;
-    // sanitiser does not strip code, only markers. This test pins the
-    // current behavior so a future "smarter" parser is a deliberate change.
+  it('treats [N] inside backticks as a normal marker — sanitiser is not a Markdown parser', () => {
+    // The backstop is intentionally not Markdown-aware: a stray `[1]` inside
+    // a code sample is rewritten the same way as outside it. The cost of
+    // rewriting a code sample is much smaller than the cost of letting an
+    // out-of-range citation through.
     expect(sanitizeCitations('Use `array[1]` and `[2]` literally.', 2)).toBe(
-      'Use `array[1]` and `[2]` literally.',
+      'Use `array[?]` and `[?]` literally.',
     );
   });
 
