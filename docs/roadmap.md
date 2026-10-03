@@ -123,12 +123,20 @@ hover popover показывает snippet + кнопку перехода в so
   - `openai`/`kokoro` остаются unimplemented (warn+noop)
 - Тесты: 5 unit на `MacSayTtsProvider` (empty lines, SCRIPT/MIRA/STAGE
   pipeline, voice override, say/ffmpeg error propagation),
-  4 unit на factory (4 провайдера + cache).
-  **Реальный** end-to-end test (3 реплики → 3.4s mp3) запускается
-  вручную: `TTS_PROVIDER=mac-say pnpm --filter @notebook/api test`.
-  Автоматизированно не покрыт — SSE-путь audioOverview плохо
-  стыкуется с `app.inject` (не дожидается `reply.raw.end()`),
-  нужен реальный fetch + явный wait на `done` event.
+  4 unit на factory (4 провайдера + cache), 1 **real** e2e
+  (`audioOverview.tts.test.ts`):
+    - app.listen(0) на эфемерном порту + реальный `fetch`
+      против SSE-эндпойнта (app.inject не дожидается
+      `reply.raw.end()`)
+    - читает SSE до `done` event, проверяет финальную meta
+      `status='ready'` + `audioFilename=*.mp3`
+    - stat'ит файл на диске (ожидаем > 0)
+    - DB row совпадает
+    - мутирует `config.OLLAMA_BASE_URL` напрямую потому что
+      config парсится один раз и `process.env` write после
+      не подхватывается
+    - skip'ается если `/usr/bin/say` недоступен
+    - 3 реплики → ~2.5s mp3 на этом Mac
 - Реальный mp3: ID3 v2.4.0 + MPEG ADTS layer III, 96 kbps,
   22.05 kHz, mono. 3 реплики SCRIPT → 3.4 сек аудио.
 - `apps/api/.env.example`: обновлён — mac-say первым в списке
