@@ -215,7 +215,7 @@ export default function NotebookPage() {
     <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
       <div className="flex h-screen flex-col">
       {/* ---- Top header ---- */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 md:px-6"
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 min-[640px]:px-6"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <div className="flex min-w-0 items-center gap-3">
           <Link
@@ -224,23 +224,23 @@ export default function NotebookPage() {
             title="Все ноутбуки"
           >
             <NotebookLogoMark size={28} />
-            <span className="hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium md:inline-flex"
+            <span className="hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium min-[640px]:inline-flex"
               style={{ borderColor: 'rgb(var(--nb-border))' }}>
               <span aria-hidden>←</span>
               Все ноутбуки
             </span>
           </Link>
           <div className="min-w-0">
-            <h1 className="truncate text-[17px] font-semibold tracking-tight md:text-[19px]">
+            <h1 className="truncate text-[17px] font-semibold tracking-tight min-[640px]:text-[19px]">
               {notebook.data.title}
             </h1>
-            <p className="hidden text-xs text-muted md:block">
+            <p className="hidden text-xs text-muted min-[640px]:block">
               {readyCount} из {totalCount} источник{ruPlural(totalCount)} готов{readyCount === 1 ? '' : 'ы'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted md:flex">
+          <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
             <span>AI-ассистент</span>
           </div>
@@ -270,8 +270,12 @@ export default function NotebookPage() {
         </div>
       </header>
 
-      {/* ---- Mobile tabs ---- */}
-      <nav className="flex shrink-0 gap-1 border-b px-2 py-2 md:hidden"
+      {/* ---- Compact-layout tabs ----
+          A 640px cutoff is intentional: a split desktop window can be about
+          744 CSS px wide, which is enough for Sources + Chat with notes
+          collapsed. Tailwind's default md cutoff (768px) made that desktop
+          window look like an unfinished mobile screen. */}
+      <nav className="flex shrink-0 gap-1 border-b px-2 py-2 min-[640px]:hidden"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <MobileTabBtn active={mobileTab === 'sources'} onClick={() => setMobileTab('sources')}>
           Источники
@@ -296,8 +300,8 @@ export default function NotebookPage() {
       {layout.mode === 'notebooklm' && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <SourcesStrip notebookId={notebookId} />
-          <div className="flex min-h-0 flex-1 overflow-hidden p-3 md:p-6">
-            <div className="hidden min-h-0 flex-1 overflow-hidden md:rounded-2xl md:border md:bg-surface md:shadow-soft md:flex"
+          <div className="flex min-h-0 flex-1 overflow-hidden p-3 min-[640px]:p-6">
+            <div className="hidden min-h-0 flex-1 overflow-hidden min-[640px]:rounded-2xl min-[640px]:border min-[640px]:bg-surface min-[640px]:shadow-soft min-[640px]:flex"
               style={{ borderColor: 'rgb(var(--nb-border))' }}>
               <PanelErrorBoundary panel="Чат">
                 <ChatPanel
@@ -309,7 +313,7 @@ export default function NotebookPage() {
                 />
               </PanelErrorBoundary>
             </div>
-            <div className="flex w-full flex-1 md:hidden">
+            <div className="flex w-full flex-1 min-[640px]:hidden">
               <PanelErrorBoundary panel="Чат">
                 <ChatPanel
                   notebookId={notebookId}
@@ -337,7 +341,7 @@ export default function NotebookPage() {
           />
         ) : (
           <aside
-            className="hidden min-w-0 shrink-0 overflow-hidden md:block"
+            className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
             style={{ width: layout.sourcesWidth, borderRight: '1px solid rgb(var(--nb-border))' }}
           >
             <SourcesPanel notebookId={notebookId} />
@@ -345,7 +349,7 @@ export default function NotebookPage() {
         )}
 
         {/* Resizer between Sources and Chat (only when both visible) */}
-        <div className="hidden md:flex">
+        <div className="hidden min-[640px]:flex">
           {!layout.sourcesCollapsed && (
             <ResizableDivider
               side="left"
@@ -357,8 +361,8 @@ export default function NotebookPage() {
         </div>
 
         {/* CENTER */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 md:gap-5 md:p-6">
-          <div className={mobileTab === 'sources' ? '' : 'hidden'}>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 min-[640px]:gap-5 min-[640px]:p-6">
+          <div className={mobileTab === 'sources' ? 'min-[640px]:hidden' : 'hidden'}>
             <div className="card overflow-hidden">
               <SourcesPanel notebookId={notebookId} />
             </div>
@@ -367,7 +371,7 @@ export default function NotebookPage() {
           {/* Mobile-only overview tab. Desktop renders the summary inside
               ChatPanel as a pinned first message (see SummaryCard) so the
               central column stays a single scrolling conversation. */}
-          <div className={mobileTab === 'overview' ? '' : 'hidden md:hidden'}>
+          <div className={mobileTab === 'overview' ? 'min-[640px]:hidden' : 'hidden'}>
             {hasReadySources ? (
               <PanelErrorBoundary panel="Краткий обзор">
                 <SummaryPanel
@@ -380,10 +384,10 @@ export default function NotebookPage() {
             )}
           </div>
 
-          <div className={mobileTab === 'chat' ? 'flex flex-1 bg-canvas' : 'hidden md:flex md:flex-1'}>
+          <div className={mobileTab === 'chat' ? 'flex min-h-0 flex-1 bg-canvas' : 'hidden min-[640px]:flex min-[640px]:min-h-0 min-[640px]:flex-1'}>
             {/* Mobile: edge-to-edge, no card wrapper.
                 Desktop: card wrapper so the chat has a defined panel boundary. */}
-            <div className="hidden md:flex md:min-h-[460px] md:w-full md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:bg-surface md:shadow-soft"
+            <div className="hidden min-h-0 min-[640px]:flex min-[640px]:h-full min-[640px]:min-h-[460px] min-[640px]:w-full min-[640px]:flex-1 min-[640px]:overflow-hidden min-[640px]:rounded-2xl min-[640px]:border min-[640px]:bg-surface min-[640px]:shadow-soft"
               style={{ borderColor: 'rgb(var(--nb-border))' }}>
               <PanelErrorBoundary panel="Чат">
                 <ChatPanel
@@ -395,7 +399,7 @@ export default function NotebookPage() {
                 />
               </PanelErrorBoundary>
             </div>
-            <div className="flex w-full flex-1 md:hidden">
+            <div className="flex min-h-0 w-full flex-1 min-[640px]:hidden">
               <PanelErrorBoundary panel="Чат">
                 <ChatPanel
                   notebookId={notebookId}
@@ -408,7 +412,7 @@ export default function NotebookPage() {
             </div>
           </div>
 
-          <div className={mobileTab === 'artifacts' ? '' : 'hidden'}>
+          <div className={mobileTab === 'artifacts' ? 'min-[640px]:hidden' : 'hidden'}>
             <ArtifactsPanel
               notebookId={notebookId}
               prefilled={prefilled}
@@ -418,7 +422,7 @@ export default function NotebookPage() {
         </main>
 
         {/* Resizer between Chat and Notes */}
-        <div className="hidden md:flex">
+        <div className="hidden min-[640px]:flex">
           {!layout.notesCollapsed && (
             <ResizableDivider
               side="right"
@@ -439,7 +443,7 @@ export default function NotebookPage() {
           />
         ) : (
           <aside
-            className="hidden min-w-0 shrink-0 overflow-hidden md:block"
+            className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
             style={{ width: layout.notesWidth, borderLeft: '1px solid rgb(var(--nb-border))' }}
           >
             <ArtifactsPanel
