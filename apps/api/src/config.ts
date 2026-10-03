@@ -19,6 +19,15 @@ const schema = z.object({
 
   // Storage
   DB_PATH: z.string().default('./data/notebook.db'),
+
+  // ASR (local Whisper). Used by the "YouTube → распознать" flow.
+  // Default points at a locally-running whisper-server on the same host.
+  WHISPER_BASE_URL: z.string().url().default('http://127.0.0.1:8000'),
+  WHISPER_LANGUAGE: z.string().default('ru'),
+
+  // Path to a Netscape-format cookies.txt for yt-dlp (optional). Required
+  // for YouTube downloads without bot walls; empty disables cookies.
+  YT_COOKIES_PATH: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
