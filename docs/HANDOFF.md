@@ -6,15 +6,20 @@
 
 ## Где остановились
 
-- Plan перебил «Source Workspace v1» (5 шагов, `023c016` / `ab3f335` / `767dd47`
-  / `afdc648`) — source-scoped chat + UI selector + reader + chat continuity.
-  Закоммичено и протестировано (66/66).
-- Три ранее обозначенные «активные доработки» (mind-map route, post-ingest graph,
-  SSE fallback endpoint) закрыты: API smoke-тесты на временной SQLite + мок Ollama
-  подтверждают.
-- README + HANDOFF синхронизированы с фактической архитектурой (sqlite-vec + FTS/BM25 + RRF).
+- Source Workspace v1 (5 шагов, `023c016` / `ab3f335` / `767dd47` / `afdc648`) —
+  source-scoped chat + UI selector + reader + chat continuity. Закоммичено
+  и протестировано.
+- Три ранее обозначенные «активные доработки» (mind-map route, post-ingest
+  graph, SSE fallback endpoint) закрыты: API smoke-тесты на временной
+  SQLite + мок Ollama подтверждают.
+- **Этап 9: устойчивость retrieval + YouTube → ASR** (коммиты
+  `32690b1`..`4d5d17d`). Готово, закоммичено, `pnpm test` зелёный.
+- README синхронизирован с фактической архитектурой (sqlite-vec +
+  FTS5/BM25 + RRF, embed-fallback, YouTube → ASR, retry-плашка).
 
 ## Что сделано в этой ветке
+
+### Ранние правки (вдоль коммитов `a0..afdc648`)
 
 - **`packages/shared/src/index.ts`** — убраны `ragflowDocId/ragflowDatasetId`.
   Это был корень "stream closed without done event": Zod-схема реджектила
@@ -38,7 +43,7 @@
 - **`apps/api/src/app.ts`** — `buildApp()` без `listen()`; `index.ts` зовёт и
   вешает реальный `/api/health`. Используется в тестах через `app.inject()`.
 
-### Source Workspace v1 (этот же коммит-сериал)
+### Source Workspace v1 (коммит-сериал `023c016`..`afdc648`)
 
 - `023c016` (api+web): `sourceIds` через retrieval + RRF + rerank + cache key,
   real `sourceKind`/`location`, single-source endpoint c `?include=chunks`.
@@ -51,13 +56,58 @@
   char-budgeted FIFO (6000); `ChatPanel` прокидывает `sourceIds` + `history`
   в `streamChat`.
 
+### Этап 9 — устойчивость + YouTube → ASR (`32690b1`..`4d5d17d`)
+
+- `32690b1` (api): `buildFtsQuery(question)` — FTS5-OR с русскими
+  стоп-словами. dense-ветка (sqlite-vec) обёрнута в try/catch: при
+  падении embed() retrieval остаётся работоспособным через FTS5.
+  Чат не «пустеет», если Ollama моргнула.
+- `73025a0` (api): friendly YouTube errors. Импортированы классы
+  `YoutubeTranscript*Error`; `friendlyYouTubeError(err, videoId)`
+  маппит каждое в человеческое русское сообщение. Перед сдачей
+  пробуем ru, потом en — InnerTube fallback для не-английских
+  локалей часто возвращал пустоту.
+- `d630248` (api): YouTube → ASR foundation. `apps/api/src/extractors/ytAudio.ts`
+  (yt-dlp shell-out с cookies, ios/web_safari player-client).
+  `apps/api/src/extractors/asr.ts` (whisper.cpp `/inference` + ffmpeg
+  → 16k mono wav). Конфиг: `WHISPER_BASE_URL`, `WHISPER_LANGUAGE`,
+  `YT_COOKIES_PATH`. Из `package.json` дропнуты мёртвые `ytdl-core`
+  и `@distube/ytdl-core` (использовался только в docstring).
+- `53546ce` (api): `POST /api/notebooks/:id/sources/youtube-asr` —
+  новый endpoint с тем же lifecycle, что у `/sources/youtube`
+  (insert pending → runIngest → SSE прогресс → status ready/failed
+  → fire-and-forget summary + graph).
+- `4a313cd` (web): `AddYoutubeAsrDialog` + `api.ingestYoutubeAsrSourceStream`.
+  Новая кнопка «YouTube → ASR» в `SourcesPanel` рядом с обычной
+  YouTube, использует общий `ProgressStepper`.
+- `4bfae0d` (web): `isSourceInScope(sourceId, selectedIds, readyIds)`.
+  Раньше пустой persisted scope показывал пустые чекбоксы у всех
+  ready-источников; теперь — все отмечены, кнопка «Все» видна
+  только при суженном scope.
+- `f54cd77` (web): mobile breakpoint 768→640. Split-screen окно
+  десктопа шириной 744 CSS px больше не показывает мобильные табы
+  поверх десктоп-лейаута.
+- `eb7fd6b` (web): retry-плашка «Ответы без цитат устарели» —
+  когда LLM ранее сказал «no sources available», а источники
+  догрузились. Кнопка «Повторить последний вопрос» переотправляет
+  запрос через `send(userMsg.content)`.
+- `4d5d17d` (chore): `apps/api/.env.example` — `WHISPER_BASE_URL`,
+  `WHISPER_LANGUAGE`, `YT_COOKIES_PATH` + короткий список
+  внешних зависимостей (brew install yt-dlp ffmpeg, whisper.cpp
+  --server).
+- `3692bdd` (docs): README — стек, ASR-флоу, env, ретри-плашка,
+  история.
+
 ## Тесты
 
 `pnpm test` зелёный:
-- 12 shared
-- 20 api (миграции, single-source + anti-leak между notebook, mind map с мок-LLM,
-  graph extraction/cleanup, source-scope retrieval)
-- 34 web (stream parsing, http-клиент, ruPlural, chatHistory, http.test)
+- 12 shared (deltas)
+- 23 api (миграции, single-source + anti-leak между notebook, mind map
+  с мок-LLM, graph extraction/cleanup, source-scope retrieval, FTS5
+  `buildFtsQuery`)
+- 40 web (stream parsing, http-клиент, ruPlural, chatHistory,
+  sourceScope `isSourceInScope`+`scopeToSourceIds`,
+  `containsUncitedNoSourceAnswer`, http.test)
 
 `pnpm -r build` зелёный. `tsc --noEmit` чист во всех трёх пакетах.
 
@@ -69,6 +119,10 @@
   (Ollama reports `size_vram=0`) → не конкурирует за VRAM с чатом.
 - дефолт чат = `qwen3.6-27b-iq4-16k:latest`, дефолт embed = `bge-m3-embed`.
 - `coder30b-abl` НЕ используем как дефолт (код-фокус, та же VRAM-стоимость).
+- **retrieval устойчивость**: dense-ветка обёрнута в try/catch; при падении
+  embed() chat остаётся на FTS5-результатах. Это не «degraded mode с баннером»,
+  а нормальный рабочий режим: пользователь видит ответ, даже если Ollama
+  рестартует.
 
 ## Constraints
 
@@ -79,16 +133,29 @@
 - Сирота `RAGFLOW_API_KEY=...` в `apps/api/.env` — игнорируется, не удалять руками.
 - DB: все 10 notebook'ов мигрированы на `default_provider='ollama',
   default_model='qwen3.6-27b-iq4-16k:latest'`.
+- **YouTube → ASR** требует: `yt-dlp` (brew), `ffmpeg` (brew),
+  `whisper.cpp --server` на `WHISPER_BASE_URL` (default `127.0.0.1:8000`).
+  Без них endpoint `POST /sources/youtube-asr` упадёт с понятной ошибкой,
+  остальное API не пострадает.
 
 ## Next
 
+См. `docs/roadmap.md` — это новый активный milestone-план.
+
 1. **Перезапустить API** на свежем коде: `pkill -f "tsx.*src/index"` →
    `pnpm --filter @notebook/api dev` (или через bundle).
-2. **Manual smoke** по плану Source Workspace v1: добавить 2 URL → кликнуть
-   checkbox на одном → задать вопрос → проверить, что цитата из цитаты
-   открывает `SourceDetailSheet` с подсвеченным чанком → сохранить raw →
-   скачать `.md`.
+2. **Manual smoke** по Этапу 9:
+   - добавить YouTube-видео без публичных сабов через кнопку «YouTube → ASR»;
+   - дождаться `ready`, проверить тайм-кодированные чанки;
+   - задать вопрос по этому source — проверить, что цитаты попадают
+     в распознанный текст;
+   - `pkill ollama`, задать вопрос — чат должен ответить через FTS5-ветку.
 3. **Merge `fix/ingest-sse-and-lifecycle` в `main`** (fast-forward).
-4. После merge — следующий milestone (план в `notebooklm-source-workspace-v1-plan.md`):
-   либо Audio/Video Overview, либо Deep Research, либо что-то ещё по приоритету
-   Макса.
+4. После merge — `docs/roadmap.md`:
+   - **Audio Overview (P0)**: TTS-пайплайн, двухголосый диалог по источникам.
+   - **Verified answering (P0)**: `UNSUPPORTED` маркер + sanitiser [N].
+   - **Inline citation hover (P0)**: popover на чипе.
+   - **bge-reranker v2 (P0)**: локально через Ollama или TEI.
+   - **Studio v1**: reports / flashcards / data-table.
+   - **Sharing**: read-only public link.
+   - **PWA + mobile polish**: manifest, service worker, ≥44 px touch targets.
