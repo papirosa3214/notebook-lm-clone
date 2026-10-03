@@ -7,6 +7,8 @@ import { notebooks, sources } from '../db/schema.js';
 import { extractDocx, extractPdf, extractPlainText } from '../extractors/index.js';
 import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { fetchYouTubeTranscript } from '../extractors/youtube.js';
+import { fetchYouTubeAudio } from '../extractors/ytAudio.js';
+import { transcribeAudio } from '../extractors/asr.js';
 import { addSourceText, removeSource } from '../vectordb/client.js';
 import { buildTriplesForSourceId, removeTriplesForSource } from '../vectordb/graph.js';
 import { runIngest } from '../lib/ingestRun.js';
@@ -410,6 +412,126 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
               .run();
             throw err;
           } finally {
+            await autoReleaseEmbedding();
+          }
+        },
+      });
+
+      if (result) return reply.code(201).send(result);
+    },
+  );
+
+  // YouTube → локальное распознавание (Whisper). Качает аудио через yt-dlp,
+  // отправляет в локальный ASR-эндпоинт, кладёт распознанный текст как
+  // обычный youtube-источник. Используется когда youtube-transcript
+  // не смог достать сабы (YouTube требует логин для большинства роликов).
+  app.post<{ Params: { id: string } }>(
+    '/api/notebooks/:id/sources/youtube-asr',
+    async (req, reply) => {
+      const parsed = z
+        .object({ url: z.string().min(1), title: z.string().optional() })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.format() });
+      }
+      const db = getDb();
+      const nb = db
+        .select()
+        .from(notebooks)
+        .where(eq(notebooks.id, req.params.id))
+        .get();
+      if (!nb) return reply.code(404).send({ error: 'notebook not found' });
+
+      const localId = nanoid(12);
+      db.insert(sources)
+        .values({
+          id: localId,
+          notebookId: req.params.id,
+          kind: 'youtube',
+          title: parsed.data.title ?? parsed.data.url,
+          url: parsed.data.url,
+          status: 'pending',
+        })
+        .run();
+
+      const result = await runIngest({
+        reply,
+        wantsStream: wantsStream(req),
+        ingest: async (emit) => {
+          await autoPrepareEmbedding();
+          let cleanup: (() => Promise<void>) | undefined;
+          try {
+            emit.progress('fetching', 0.1, 'Скачиваю аудио с YouTube…', localId);
+            const audio = await fetchYouTubeAudio(parsed.data.url);
+            cleanup = audio.cleanup;
+
+            emit.progress(
+              'extracting',
+              0.4,
+              `Распознаю речь (~${Math.max(1, Math.round(audio.durationSec / 60))} мин)…`,
+              localId,
+            );
+            const { text } = await transcribeAudio(audio.audioPath);
+            const finalTitle = parsed.data.title ?? audio.title;
+
+            emit.progress('embedding', 0.85, 'Создаю embeddings…', localId);
+            await addSourceText(
+              {
+                notebookId: req.params.id,
+                sourceId: localId,
+                kind: 'youtube',
+                title: finalTitle,
+                url: parsed.data.url,
+                content: text,
+              },
+              (done, total) => {
+                emit.progress(
+                  'embedding',
+                  0.85 + (done / total) * 0.1,
+                  `Эмбеддинг: ${done}/${total} чанков`,
+                  localId,
+                );
+              },
+            );
+
+            emit.progress('storing', 0.97, 'Сохраняю…', localId);
+            db.update(sources)
+              .set({ title: finalTitle, status: 'ready' })
+              .where(eq(sources.id, localId))
+              .run();
+
+            void summarizeSource(localId, {
+              provider: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
+            });
+
+            void buildTriplesForSourceId({
+              notebookId: req.params.id,
+              sourceId: localId,
+              providerId: nb.defaultProvider,
+              model: nb.defaultModel,
+            }).catch((err) => {
+              app.log.warn({ err, sourceId: localId }, 'post-ingest graph triples failed');
+            });
+
+            const stored = db
+              .select()
+              .from(sources)
+              .where(eq(sources.id, localId))
+              .get();
+            if (!stored) throw new Error('source disappeared after insert');
+            return stored;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            db.update(sources)
+              .set({ status: 'failed', error: msg })
+              .where(eq(sources.id, localId))
+              .run();
+            throw err;
+          } finally {
+            if (cleanup) await cleanup().catch(() => {});
             await autoReleaseEmbedding();
           }
         },
