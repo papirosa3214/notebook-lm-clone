@@ -59,13 +59,15 @@ export const ArtifactSchema = z.object({
   notebookId: z.string(),
   title: z.string(),
   contentMd: z.string(),
-  // 'note' (default — pure markdown) or 'audio_overview'. UI uses it to
-  // decide between markdown preview and audio player.
-  kind: z.enum(['note', 'audio_overview']).default('note'),
+  // 'note' (default — pure markdown), 'audio_overview' (script + audio),
+  // or 'report' (Studio template). UI uses kind to decide between
+  // markdown preview, audio player, or report card.
+  kind: z.enum(['note', 'audio_overview', 'report']).default('note'),
   // JSON-encoded metadata. For 'note' it stays null; for 'audio_overview'
-  // it carries the AudioOverviewMeta shape (see below). Left as a free
-  // string so future artifact kinds (table, flashcards, report, …) can
-  // add their own metadata without a schema migration.
+  // it carries AudioOverviewMeta; for 'report' it carries
+  // StudioReportMeta. Left as a free string so future artifact kinds
+  // (table, flashcards, …) can add their own metadata without a schema
+  // migration.
   meta: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -144,6 +146,59 @@ export const AudioOverviewDeltaSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type AudioOverviewDelta = z.infer<typeof AudioOverviewDeltaSchema>;
+
+// === Studio Reports =====================================================
+// "Studio" is NotebookLM's term for templated LLM outputs that go
+// beyond a free-form chat answer: FAQ, executive summary, timeline of
+// events, contradiction report, etc. We persist each as an Artifact
+// with kind='report' and a meta JSON that records the template id.
+
+/** Template identifiers. Add a new one by extending the registry in
+ *  apps/api/src/lib/studio/templates.ts — the schema here is the
+ *  source of truth. */
+export const StudioTemplateSchema = z.enum([
+  'faq',
+  'executive_summary',
+  'timeline',
+  'contradictions',
+]);
+export type StudioTemplate = z.infer<typeof StudioTemplateSchema>;
+
+export const StudioRequestSchema = z.object({
+  template: StudioTemplateSchema,
+  /** Optional user-supplied extra direction appended to the system prompt. */
+  focus: z.string().max(500).optional(),
+  /** Restrict the report to these sources (same validation as chat sourceIds). */
+  sourceIds: z.array(z.string().min(1)).max(50).optional(),
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+  /** Retrieval depth for the template prompt. Each template has a
+   *  sensible default in the registry; clients can override. */
+  topK: z.number().int().min(2).max(30).optional(),
+});
+export type StudioRequest = z.infer<typeof StudioRequestSchema>;
+
+/** Persisted shape of a Studio artifact's metadata. Mirrors the
+ *  AudioOverviewMeta pattern so the Artifacts panel can render
+ *  different artifact kinds uniformly. */
+export const StudioReportMetaSchema = z.object({
+  template: StudioTemplateSchema,
+  /** Total citation chunks the template was grounded on. */
+  citationCount: z.number().int().min(0),
+  /** When the artifact was first created (ISO). */
+  createdAt: z.string(),
+});
+export type StudioReportMeta = z.infer<typeof StudioReportMetaSchema>;
+
+/** SSE delta. Mirrors chat and audio overview patterns so the client
+ *  stream helper is reusable. */
+export const StudioDeltaSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('citations'), chunks: z.array(CitationChunkSchema) }),
+  z.object({ type: z.literal('token'), text: z.string() }),
+  z.object({ type: z.literal('done'), artifactId: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type StudioDelta = z.infer<typeof StudioDeltaSchema>;
 
 // === Chat history row (server-side persistence) ===
 // Each row is one turn of a chat conversation. Used by the API to return

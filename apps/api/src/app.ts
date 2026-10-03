@@ -13,6 +13,7 @@ import { discoverRoutes } from './routes/discover.js';
 import { summaryRoutes } from './routes/summary.js';
 import { mindmapRoutes } from './routes/mindmap.js';
 import { audioOverviewRoutes } from './routes/audioOverview.js';
+import { studioRoutes } from './routes/studio.js';
 
 /**
  * Construct the Fastify app without binding to a port. The production
@@ -49,6 +50,7 @@ export async function buildApp(
   await app.register(mindmapRoutes);
   await app.register(graphRoutes);
   await app.register(audioOverviewRoutes);
+  await app.register(studioRoutes);
 
   return app;
 }

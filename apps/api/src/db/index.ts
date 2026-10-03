@@ -201,7 +201,7 @@ function migrate(sqlite: Database.Database) {
     sqlite,
     'artifacts',
     'kind',
-    `TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'audio_overview'))`,
+    `TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'audio_overview', 'report'))`,
   );
   addColumnIfMissing(sqlite, 'artifacts', 'meta', 'TEXT');
 }

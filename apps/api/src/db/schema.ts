@@ -46,10 +46,11 @@ export const artifacts = sqliteTable('artifacts', {
     .references(() => notebooks.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   contentMd: text('content_md').notNull(),
-  // 'note' (default — pure markdown) or 'audio_overview' (script + audio).
+  // 'note' (default — pure markdown), 'audio_overview' (script + audio),
+  // or 'report' (Studio template: FAQ, TL;DR, timeline, contradictions).
   // Picked by the create endpoint; UI uses it to decide between markdown
-  // preview and audio player.
-  kind: text('kind', { enum: ['note', 'audio_overview'] })
+  // preview, audio player, or report card.
+  kind: text('kind', { enum: ['note', 'audio_overview', 'report'] })
     .notNull()
     .default('note'),
   // JSON-encoded artifact-specific metadata. For audio_overview this is
