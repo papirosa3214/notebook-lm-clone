@@ -1,12 +1,18 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const WEB_ROOT = join(import.meta.dirname, '..');
+// Resolve the apps/web root from this test file. We can't use
+// `import.meta.dirname` because Vitest sets that to the test
+// file's directory, which is src/lib/pwa/ — we need to go up to
+// the apps/web root to read index.html and public/.
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const WEB_ROOT = resolve(TEST_DIR, '..', '..', '..');
 
-function read(name: string): string {
-  return readFileSync(join(WEB_ROOT, name), 'utf8');
+function read(rel: string): string {
+  return readFileSync(join(WEB_ROOT, rel), 'utf8');
 }
 
 describe('PWA manifest', () => {
