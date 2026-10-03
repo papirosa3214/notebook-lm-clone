@@ -5,16 +5,21 @@ import { getDb } from '../db/index.js';
 import { artifacts, chunks, messages, notebooks, sources } from '../db/schema.js';
 import { sanitizeFilename } from './artifacts.js';
 
-// Archiver is a CommonJS module whose @types/archiver typings don't
-// declare a default export. Use createRequire to load the runtime
-// directly, which gives us the actual factory function.
-const require = createRequire(import.meta.url);
-const archiver: (format: 'zip' | 'tar', opts?: unknown) => {
-  append(data: string | Buffer, opts?: { name?: string }): void;
-  pipe(dest: NodeJS.WritableStream): void;
-  finalize(): Promise<void>;
-  on(event: string, listener: (...args: unknown[]) => void): void;
-} = require('archiver');
+// Archiver is a CommonJS module that exports named classes
+// (Archiver, ZipArchive, …), not a default function. The bundled
+// @types/archiver typings don't declare a default either, so we load
+// the runtime via createRequire and use the ZipArchive class
+// directly. The shape we rely on (append / pipe / finalize / on) is
+// stable across recent major versions.
+const require_ = createRequire(import.meta.url);
+const { ZipArchive } = require_('archiver') as {
+  ZipArchive: new (opts?: { zlib?: { level?: number } }) => {
+    append(data: string | Buffer, opts?: { name?: string }): void;
+    pipe(dest: NodeJS.WritableStream): void;
+    finalize(): Promise<void>;
+    on(event: string, listener: (...args: unknown[]) => void): void;
+  };
+};
 
 const MAX_CHUNK_BYTES_PER_SOURCE = 4 * 1024 * 1024; // 4 MB safety cap
 
@@ -48,8 +53,6 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
         .get();
       if (!nb) return reply.code(404).send({ error: 'notebook not found' });
 
-      // Pre-load everything we need (small, in-memory). The big
-      // content (chunks) we stream into the archive lazily.
       const sourceRows = db
         .select()
         .from(sources)
@@ -67,8 +70,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
         .orderBy(asc(messages.createdAt))
         .all();
 
-      // Build the zip stream.
-      const zip = archiver('zip', { zlib: { level: 6 } });
+      const zip = new ZipArchive({ zlib: { level: 6 } });
       reply.raw.writeHead(200, {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${sanitizeFilename(nb.title)}.zip"`,
@@ -76,12 +78,10 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       });
       zip.pipe(reply.raw);
 
-      // README.md (top of the archive, human-readable)
       zip.append(buildReadme(nb.title, nb.createdAt, sourceRows, artifactRows), {
         name: 'README.md',
       });
 
-      // metadata.json
       const meta = {
         id: nb.id,
         title: nb.title,
@@ -95,18 +95,15 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       };
       zip.append(JSON.stringify(meta, null, 2), { name: 'metadata.json' });
 
-      // sources/*.md — chunked body joined with double newlines.
       for (const s of sourceRows) {
         const body = buildSourceMarkdown(s, db);
         zip.append(body, { name: `sources/${sanitizeFilename(s.id)}.md` });
       }
 
-      // artifacts/*.md
       for (const a of artifactRows) {
         zip.append(a.contentMd, { name: `artifacts/${sanitizeFilename(a.id)}.md` });
       }
 
-      // chat.md — flattened transcript.
       zip.append(buildChatMarkdown(chatRows), { name: 'chat.md' });
 
       zip.finalize().catch((err: unknown) => {
@@ -117,8 +114,6 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
           // socket may already be closed
         }
       });
-      // Stream already piped; returning reply without a value keeps
-      // Fastify from short-circuiting.
       return reply;
     },
   );
@@ -168,10 +163,6 @@ function buildSourceMarkdown(
   s: { id: string; kind: string; title: string; url: string | null; status: string; summary: string | null },
   db: ReturnType<typeof getDb>,
 ): string {
-  // Concatenate all chunks of this source in ordinal order. We cap
-  // total bytes per source so a single pathological source can't
-  // blow up the zip size — anything beyond the cap is truncated
-  // with a note.
   const chunkRows = db
     .select({ ordinal: chunks.ordinal, content: chunks.content })
     .from(chunks)
