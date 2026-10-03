@@ -46,6 +46,14 @@ export interface Artifact {
   contentMd: string;
   createdAt: string;
   updatedAt: string;
+  /** 'note' (default), 'audio_overview', or 'report' (Studio
+   *  templates). UI uses this to pick a renderer. Older rows
+   *  pre-dating the field default to 'note' server-side. */
+  kind?: 'note' | 'audio_overview' | 'report';
+  /** JSON-encoded metadata. For 'audio_overview' / 'report' this
+   *  is the typed shape; we keep it as a free string on the
+   *  client to avoid duplicating the union from shared/. */
+  meta?: string | null;
 }
 
 export type ChatDelta =

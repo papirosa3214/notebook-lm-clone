@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { Artifact } from '../lib/types';
+import { FlashcardDeck } from './FlashcardDeck';
 import {
   PlusIcon,
   CloseIcon,
@@ -173,6 +174,13 @@ function ArtifactEditor({
   onClose: () => void;
   onDelete: () => void;
 }) {
+  // Detect flashcards by inspecting the artifact meta. We could
+  // also use `artifact.kind === 'report' && meta.template === 'flashcards'`
+  // but the meta might be missing for legacy rows — the safe path
+  // is to try parsing the body and fall through to the markdown
+  // editor on failure.
+  const isFlashcards = isFlashcardArtifact(artifact);
+
   const [title, setTitle] = useState(artifact.title);
   const [contentMd, setContentMd] = useState(artifact.contentMd);
   const [dirty, setDirty] = useState(false);
@@ -200,8 +208,9 @@ function ArtifactEditor({
           </a>
           <button
             onClick={() => save.mutate()}
-            disabled={!dirty || save.isPending}
+            disabled={!dirty || save.isPending || isFlashcards}
             className="btn btn-primary text-xs"
+            title={isFlashcards ? 'Заголовок редактируется отдельно; карточки неизменяемы' : undefined}
           >
             {save.isPending ? '…' : 'Сохранить'}
           </button>
@@ -219,20 +228,57 @@ function ArtifactEditor({
         }}
         placeholder="Заголовок заметки"
       />
-      <textarea
-        className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
-        value={contentMd}
-        onChange={(e) => {
-          setContentMd(e.target.value);
-          setDirty(true);
-        }}
-        placeholder="Текст заметки в Markdown…"
-      />
-      {dirty && (
-        <p className="mt-2 text-center text-[11px] font-medium text-accent">
-          ● Не сохранено
-        </p>
+      {isFlashcards ? (
+        <div className="flex-1 overflow-y-auto">
+          <FlashcardDeck data={artifact.contentMd} />
+        </div>
+      ) : (
+        <>
+          <textarea
+            className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
+            value={contentMd}
+            onChange={(e) => {
+              setContentMd(e.target.value);
+              setDirty(true);
+            }}
+            placeholder="Текст заметки в Markdown…"
+          />
+          {dirty && (
+            <p className="mt-2 text-center text-[11px] font-medium text-accent">
+              ● Не сохранено
+            </p>
+          )}
+        </>
       )}
     </div>
   );
+}
+
+/** True when the artifact is a Studio-generated flashcard set.
+ *  Detection: meta.template === 'flashcards' (preferred) OR the
+ *  body parses as a FlashcardSet JSON. The fallback lets the
+ *  shared/legacy paths still render the deck. */
+function isFlashcardArtifact(artifact: Artifact): boolean {
+  if (artifact.meta) {
+    try {
+      const meta = JSON.parse(artifact.meta) as { template?: string };
+      if (meta.template === 'flashcards') return true;
+    } catch {
+      // fall through to body-based detection
+    }
+  }
+  try {
+    const parsed = JSON.parse(artifact.contentMd) as unknown;
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'cards' in parsed &&
+      Array.isArray((parsed as { cards: unknown }).cards)
+    ) {
+      return true;
+    }
+  } catch {
+    // not a flashcard artifact
+  }
+  return false;
 }
