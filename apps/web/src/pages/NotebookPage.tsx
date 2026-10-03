@@ -12,6 +12,7 @@ import { PanelErrorBoundary } from '../components/ErrorBoundary';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { AudioOverviewDialog } from '../components/AudioOverviewDialog';
+import { StudioReportDialog } from '../components/StudioReportDialog';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
@@ -169,6 +170,7 @@ export default function NotebookPage() {
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [showAudioDialog, setShowAudioDialog] = useState(false);
+  const [showStudioDialog, setShowStudioDialog] = useState(false);
 
   // Live drag — drives both the visible width (via setLayout) and the
   // persisted layout so a reload keeps the user's choice.
@@ -251,6 +253,16 @@ export default function NotebookPage() {
           >
             <SparkleIcon size={12} className="text-accent" />
             <span>Audio Overview</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowStudioDialog(true)}
+            disabled={readyCount === 0}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink disabled:opacity-50 min-[640px]:inline-flex"
+            title={readyCount === 0 ? 'Сначала добавьте источники' : 'Сгенерировать структурированный отчёт (FAQ, TL;DR, timeline, противоречия)'}
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Studio</span>
           </button>
           <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
@@ -508,6 +520,12 @@ export default function NotebookPage() {
         <AudioOverviewDialog
           notebookId={notebookId}
           onClose={() => setShowAudioDialog(false)}
+        />
+      )}
+      {showStudioDialog && (
+        <StudioReportDialog
+          notebookId={notebookId}
+          onClose={() => setShowStudioDialog(false)}
         />
       )}
     </div>

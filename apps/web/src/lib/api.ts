@@ -40,6 +40,9 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  // generic GET (used by feature dialogs that fetch their own metadata,
+  // e.g. Studio templates).
+  get: <T>(path: string) => http<T>(path),
   // notebooks
   listNotebooks: () => http<{ notebooks: Notebook[] }>('/api/notebooks'),
   createNotebook: (title: string) =>
