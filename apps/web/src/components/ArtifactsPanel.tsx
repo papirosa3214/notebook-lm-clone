@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { Artifact } from '../lib/types';
 import { FlashcardDeck } from './FlashcardDeck';
+import { DataTableView } from './DataTableView';
 import {
   PlusIcon,
   CloseIcon,
@@ -133,31 +134,42 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
           />
         ) : (
           <ul className="space-y-2">
-            {artifacts.data?.artifacts.map((a) => (
-              <li
-                key={a.id}
-                className="source-pill group cursor-pointer"
-                onClick={() => setSelectedId(a.id)}
-              >
-                <span
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base"
-                  style={{
-                    backgroundColor: 'rgb(var(--nb-accent-soft))',
-                  }}
+            {artifacts.data?.artifacts.map((a) => {
+              const badge = artifactBadge(a);
+              return (
+                <li
+                  key={a.id}
+                  className="source-pill group cursor-pointer"
+                  onClick={() => setSelectedId(a.id)}
+                  data-testid={`artifact-list-item-${a.id}`}
                 >
-                  📝
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{a.title}</div>
-                  <div className="truncate text-xs text-muted">
-                    {a.contentMd.slice(0, 80).replace(/\n/g, ' ')}
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base"
+                    style={{
+                      backgroundColor: 'rgb(var(--nb-accent-soft))',
+                    }}
+                  >
+                    {badge.icon}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{a.title}</span>
+                      {badge.label && (
+                        <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent">
+                          {badge.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="truncate text-xs text-muted">
+                      {badge.subtitle}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-subtle">
+                      {new Date(a.updatedAt).toLocaleString('ru')}
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[10px] text-subtle">
-                    {new Date(a.updatedAt).toLocaleString('ru')}
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -174,12 +186,14 @@ function ArtifactEditor({
   onClose: () => void;
   onDelete: () => void;
 }) {
-  // Detect flashcards by inspecting the artifact meta. We could
-  // also use `artifact.kind === 'report' && meta.template === 'flashcards'`
-  // but the meta might be missing for legacy rows — the safe path
-  // is to try parsing the body and fall through to the markdown
-  // editor on failure.
-  const isFlashcards = isFlashcardArtifact(artifact);
+  // The editor detects Studio-generated structured artifacts by meta
+  // and falls back to body-shape detection for legacy / shared rows.
+  // Three modes:
+  //   - report + template=flashcards → FlashcardDeck
+  //   - report + template=data_table → DataTableView
+  //   - everything else → markdown textarea
+  const specialRender = detectSpecialRender(artifact);
+  const isReadonlyBody = specialRender !== 'markdown';
 
   const [title, setTitle] = useState(artifact.title);
   const [contentMd, setContentMd] = useState(artifact.contentMd);
@@ -208,9 +222,13 @@ function ArtifactEditor({
           </a>
           <button
             onClick={() => save.mutate()}
-            disabled={!dirty || save.isPending || isFlashcards}
+            disabled={!dirty || save.isPending || isReadonlyBody}
             className="btn btn-primary text-xs"
-            title={isFlashcards ? 'Заголовок редактируется отдельно; карточки неизменяемы' : undefined}
+            title={
+              isReadonlyBody
+                ? 'Заголовок редактируется отдельно; тело артефакта неизменяемо'
+                : undefined
+            }
           >
             {save.isPending ? '…' : 'Сохранить'}
           </button>
@@ -228,11 +246,17 @@ function ArtifactEditor({
         }}
         placeholder="Заголовок заметки"
       />
-      {isFlashcards ? (
+      {specialRender === 'flashcards' && (
         <div className="flex-1 overflow-y-auto">
           <FlashcardDeck data={artifact.contentMd} />
         </div>
-      ) : (
+      )}
+      {specialRender === 'data_table' && (
+        <div className="flex-1 overflow-y-auto">
+          <DataTableView data={artifact.contentMd} />
+        </div>
+      )}
+      {specialRender === 'markdown' && (
         <>
           <textarea
             className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
@@ -254,31 +278,91 @@ function ArtifactEditor({
   );
 }
 
-/** True when the artifact is a Studio-generated flashcard set.
- *  Detection: meta.template === 'flashcards' (preferred) OR the
- *  body parses as a FlashcardSet JSON. The fallback lets the
- *  shared/legacy paths still render the deck. */
-function isFlashcardArtifact(artifact: Artifact): boolean {
+/** Discriminator for the structured Studio renderers. We check
+ *  `meta.template` first (cheap, no JSON parse of the body) and
+ *  fall back to body-shape detection for legacy / shared rows that
+ *  pre-date the meta column. */
+function detectSpecialRender(artifact: Artifact): 'flashcards' | 'data_table' | 'markdown' {
   if (artifact.meta) {
     try {
       const meta = JSON.parse(artifact.meta) as { template?: string };
-      if (meta.template === 'flashcards') return true;
+      if (meta.template === 'flashcards') return 'flashcards';
+      if (meta.template === 'data_table') return 'data_table';
     } catch {
       // fall through to body-based detection
     }
   }
+  // Body-shape fallback.
   try {
     const parsed = JSON.parse(artifact.contentMd) as unknown;
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'cards' in parsed &&
-      Array.isArray((parsed as { cards: unknown }).cards)
-    ) {
-      return true;
+    if (typeof parsed === 'object' && parsed !== null) {
+      if ('cards' in parsed && Array.isArray((parsed as { cards: unknown }).cards)) {
+        return 'flashcards';
+      }
+      if (
+        'columns' in parsed &&
+        Array.isArray((parsed as { columns: unknown }).columns) &&
+        'rows' in parsed &&
+        Array.isArray((parsed as { rows: unknown }).rows)
+      ) {
+        return 'data_table';
+      }
     }
   } catch {
-    // not a flashcard artifact
+    // not a JSON body — falls through to markdown
   }
-  return false;
+  return 'markdown';
+}
+
+/** Visual badge for the artifact list row. Defaults to a plain
+ *  "📝 note" chip; structured templates get a coloured label and
+ *  a quick summary derived from the body. */
+function artifactBadge(a: Artifact): {
+  icon: string;
+  label: string | null;
+  subtitle: string;
+} {
+  const kind = detectSpecialRender(a);
+  if (kind === 'flashcards') {
+    let count: number | null = null;
+    try {
+      const parsed = JSON.parse(a.contentMd) as { cards?: unknown };
+      if (Array.isArray(parsed.cards)) count = parsed.cards.length;
+    } catch {
+      // body may be unparseable; fall through to meta label
+    }
+    if (a.meta) {
+      try {
+        const m = JSON.parse(a.meta) as { flashcardCount?: number };
+        if (typeof m.flashcardCount === 'number') count = m.flashcardCount;
+      } catch {
+        // ignore
+      }
+    }
+    return {
+      icon: '🃏',
+      label: 'Flashcards',
+      subtitle: count ? `${count} карточек` : 'Интерактивный deck',
+    };
+  }
+  if (kind === 'data_table') {
+    let cols: number | null = null;
+    let rows: number | null = null;
+    if (a.meta) {
+      try {
+        const m = JSON.parse(a.meta) as { columnCount?: number; rowCount?: number };
+        if (typeof m.columnCount === 'number') cols = m.columnCount;
+        if (typeof m.rowCount === 'number') rows = m.rowCount;
+      } catch {
+        // ignore
+      }
+    }
+    const subtitle = cols && rows ? `${cols} × ${rows}` : 'Сравнительная таблица';
+    return { icon: '📊', label: 'Data Table', subtitle };
+  }
+  return {
+    icon: '📝',
+    label: null,
+    subtitle: a.contentMd.slice(0, 80).replace(/\n/g, ' '),
+  };
 }
