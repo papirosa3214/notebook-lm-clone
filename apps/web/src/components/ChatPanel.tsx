@@ -85,6 +85,10 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   });
   const readyCount =
     sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
+  const hasUncitedNoSourceAnswer = useMemo(
+    () => containsUncitedNoSourceAnswer(messages, readyCount),
+    [messages, readyCount],
+  );
 
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('qwen3.6-27b-iq4-16k:latest');
@@ -108,8 +112,8 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }, [input]);
 
-  function send() {
-    const text = input.trim();
+  function send(messageOverride?: string) {
+    const text = (messageOverride ?? input).trim();
     if (!text || streaming) return;
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -192,8 +196,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   function retryLastUserMessage() {
     const userMsg = [...messages].reverse().find((m) => m.role === 'user');
     if (!userMsg) return;
-    setInput(userMsg.content);
-    setTimeout(() => send(), 0);
+    send(userMsg.content);
   }
 
   // Cycle the LLM provider ollama→anthropic→openai→ollama so the user can
@@ -220,7 +223,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   }
 
   return (
-    <div className="flex h-full flex-col bg-canvas md:bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-canvas min-[640px]:bg-surface">
       {/* ---- Provider/model strip ---- */}
       <div className="flex items-center justify-between gap-2 border-b px-4 py-2"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
@@ -272,8 +275,29 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
         </div>
       </div>
 
+      {hasUncitedNoSourceAnswer && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 border-b bg-surface-tint px-4 py-2 text-xs text-muted"
+          style={{ borderColor: 'rgb(var(--nb-border))' }}
+          role="status"
+        >
+          <span>
+            Сейчас доступны {readyCount} источн{readyCount === 1 ? 'ик' : 'иков'}.
+            {' '}Ответы без цитат выше не обновляются автоматически.
+          </span>
+          <button
+            type="button"
+            onClick={retryLastUserMessage}
+            disabled={streaming}
+            className="font-medium text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Повторить последний вопрос
+          </button>
+        </div>
+      )}
+
       {/* ---- Messages ---- */}
-      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 min-[640px]:px-6">
         {/* Pinned summary card — the cached notebook summary is rendered
             as the first message so the user sees the overview before any
             chat turns. Inline [N] citations are clickable. */}
@@ -319,7 +343,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
           e.preventDefault();
           send();
         }}
-        className="border-t p-3 md:p-4"
+        className="border-t p-3 min-[640px]:p-4"
         style={{ borderColor: 'rgb(var(--nb-border))' }}
       >
         <div
@@ -599,4 +623,22 @@ function renderInline(
     }
   }
   return parts;
+}
+
+/**
+ * A stored assistant row cannot be retroactively grounded when sources finish
+ * ingestion. Flag the specific historical failure wording so the UI can tell
+ * the user to retry instead of implying the currently-ready sources are empty.
+ */
+export function containsUncitedNoSourceAnswer(
+  messages: ChatMessage[],
+  readyCount: number,
+): boolean {
+  if (readyCount === 0) return false;
+  return messages.some(
+    (message) =>
+      message.role === 'assistant' &&
+      (!message.citations || message.citations.length === 0) &&
+      /no sources available|источники\s+(?:отсутствуют|недоступны)/iu.test(message.content),
+  );
 }
