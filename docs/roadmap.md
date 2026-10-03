@@ -335,19 +335,51 @@ worker кэширует app shell для офлайн-первого-старт�
 
 ## Milestone F — Polish (P2, M)
 
-- **Inline AI note assist** — text selection в `ArtifactsPanel` editor →
-  контекстное меню «Переписать / Расширить / Сжать». `POST /api/artifacts/:id/ai-edit`.
-- **Multi-format previews** — `GET /api/sources/:id/preview`:
-  PDF первая страница (`pdfjs-dist` + `canvas`), DOCX (`mammoth.toHtml()`),
-  image thumbnail.
-- **Confidence score на цитате** — `CitationChunk.score` уже есть
-  (distance от sqlite-vec). Цвет чипа: < 0.5 зелёный, 0.5–1.0 жёлтый,
-  > 1.0 красный.
-- **Mind map** — `react-flow` (новая зависимость), кастомный node-стиль
-  под дизайн-систему. Использует существующий `GET /api/notebooks/:id/mindmap`.
-- **Suggested follow-up questions** (gap #4) — после `done` маленький
-  LLM-вызов «suggest 3 short Russian follow-up questions»; стримить
-  `suggestions` SSE; чипы под ассистент-баблом.
+### F1. Suggested follow-up questions — **сделано** (текущая ветка)
+- `packages/shared`: `SuggestionsRequest` (question, answer,
+  history?, sourceIds?, provider?, model?, count 1-5),
+  `SuggestionsDelta` (SSE: token | suggestions | done | error).
+- `apps/api/src/lib/studio/jsonArray.ts` — общий tolerant
+  JSON-массив парсер, переиспользуется flashcards/data_table
+  (в будущем — оба переедут на этот хелпер).
+- `apps/api/src/routes/suggestions.ts`:
+  - `POST /api/notebooks/:id/suggestions` (SSE)
+  - `SUGGESTIONS_ENABLED=false` → 503 (kill switch)
+  - unknown sourceIds → 400 (тот же контракт что у /chat)
+  - system prompt: строго JSON-массив, <200 символов на вопрос,
+    разнообразие формулировок (что/как/почему/сравни)
+  - history trim до 6 последних сообщений
+  - финальный `suggestions` event с cleaned + truncated list
+- `apps/api/src/config.ts`: `SUGGESTIONS_ENABLED` (default true,
+  transform к boolean).
+- UI: `SuggestionsChips` рендерит 3 чипа под assistant-message.
+  Click → `onPick(suggestion)` → `setInput` в ChatPanel.
+  - 503 / error → silent hide (чат не блокируется)
+  - abort при unmount через AbortController
+- Тесты: 6 e2e (clean array, fences, trim+cap, garbage → error,
+  unknown sourceIds, unknown notebook), 6 unit на `parseJsonArray`
+  (clean, prose wrapping, fences, comments, garbage, limit),
+  6 unit на `SuggestionsChips` (loading, render, click, 503,
+  error, abort).
+
+### F2. Inline AI note assist — следующая итерация
+- Text selection в `ArtifactsPanel` editor → контекстное меню
+  «Переписать / Расширить / Сжать». `POST /api/artifacts/:id/ai-edit`
+  со streaming-ответом, вставка в editor.
+
+### F3. Multi-format previews
+- `GET /api/sources/:id/preview`:
+  PDF первая страница (`pdfjs-dist` + `canvas`),
+  DOCX (`mammoth.toHtml()`), image thumbnail.
+
+### F4. Confidence score на цитате
+- `CitationChunk.score` уже есть (distance от sqlite-vec).
+  Цвет чипа: < 0.5 зелёный, 0.5–1.0 жёлтый, > 1.0 красный.
+
+### F5. Mind map (react-flow)
+- `react-flow` (новая зависимость), кастомный node-стиль
+  под дизайн-систему. Использует существующий
+  `GET /api/notebooks/:id/mindmap`.
 
 ---
 

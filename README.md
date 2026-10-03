@@ -190,6 +190,7 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `GET /api/notebooks/:id/artifacts` | Список артефактов |
 | `POST /api/notebooks/:id/artifacts` | Создать |
 | `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions / **flashcards** / **data_table**) |
+| `POST /api/notebooks/:id/suggestions` | SSE: 3 follow-up вопроса по последней паре Q/A (503 если `SUGGESTIONS_ENABLED=false`) |
 | `POST /api/notebooks/:id/artifacts/studio` | Сгенерировать Studio-отчёт (SSE: citations → token* → done), persist `kind='report'` |
 | `POST /api/notebooks/:id/share` | Включить read-only шаринг, вернуть `shareToken` + `shareUrl` |
 | `GET /api/notebooks/:id/share` | Текущее состояние шаринга |
