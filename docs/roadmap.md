@@ -198,11 +198,32 @@ hover popover показывает snippet + кнопку перехода в so
   НЕ переиспользует NotebookPage).
 - Тесты: 4 owner + 5 public = 9 smoke.
 
-### D2. Export notebook (.zip) — **следующая итерация**
-- `GET /api/notebooks/:id/export.zip` — `archiver` или `zip-stream`.
-- Внутри: артефакты (.md), source markdown, `metadata.json` (источники,
-  даты, опционально chat history), cover.
-- UI: кнопка «Скачать ноутбук» в настройках.
+### D2. Export notebook (.zip) — **сделано** (`5490d37`, `59aee85`, `f804699` на текущей ветке)
+- `apps/api/src/routes/export.ts`:
+  - `GET /api/notebooks/:id/export.zip` — streaming через
+    `archiver` (`ZipArchive`, обёртка через `createRequire`
+    из-за named-export CJS-модуля)
+  - 200 + `application/zip` + `Content-Disposition: attachment;
+    filename="<sanitised-title>.zip"`
+  - 404 для unknown notebook
+- Layout архива:
+  - `README.md` — структура + индекс источников/артефактов
+  - `metadata.json` — машинно-читаемая сводка (id, title, provider,
+    model, createdAt, exportedAt, counts)
+  - `sources/<id>.md` — YAML front-matter (id/title/kind/status/url)
+    + summary quote + chunked body в ordinal-порядке
+  - `artifacts/<id>.md` — `contentMd` as-is (note / report /
+    audio_overview script)
+  - `chat.md` — сплошная история диалога, role headers
+  - safety: per-source byte cap 4 MB с пометкой 'truncated'
+- UI: `<a href={api.exportUrl(notebookId)} download>` в шапке
+  ноутбука — `download` атрибут даёт браузеру сохранить с
+  filename из Content-Disposition.
+- Тесты: 7 smoke через `fflate.unzipSync` — реально
+  распаковывают архив, проверяют каждое поле каждого
+  файла (front-matter, summary, chunked body в ordinal-порядке,
+  artifact contentMd 1:1, chat role headers, пустой placeholder,
+  metadata counts).
 
 ---
 

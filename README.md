@@ -171,6 +171,7 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `GET /api/notebooks/:id/share` | Текущее состояние шаринга |
 | `DELETE /api/notebooks/:id/share` | Закрыть доступ (token → NULL) |
 | `GET /api/shared/:token` | Публичный read-only snapshot ноутбука (no auth, 404 на unknown/revoked) |
+| `GET /api/notebooks/:id/export.zip` | Streaming .zip со всеми источниками, артефактами, README и историей чата |
 | `GET /api/artifacts/:id` | Прочитать |
 | `PATCH /api/artifacts/:id` | Обновить title/contentMd |
 | `GET /api/artifacts/:id/download` | Скачать как `.md` |
