@@ -1,0 +1,27 @@
+{
+  "name": "Notebook",
+  "short_name": "Notebook",
+  "description": "Веб-приложение в духе Google NotebookLM: источники + чат с LLM + markdown-артефакты.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F0E8",
+  "theme_color": "#F4F0E8",
+  "categories": ["productivity", "education"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

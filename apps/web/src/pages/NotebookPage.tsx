@@ -221,7 +221,7 @@ export default function NotebookPage() {
     <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
       <div className="flex h-screen flex-col">
       {/* ---- Top header ---- */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 min-[640px]:px-6"
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 min-[640px]:px-6 pt-safe pl-safe pr-safe"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <div className="flex min-w-0 items-center gap-3">
           <Link

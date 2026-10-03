@@ -89,9 +89,9 @@
   /* ---- Buttons ----------------------------------------------------- */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2
-           text-sm font-medium transition-all
+           text-sm font-medium transition-all min-h-[36px]
            disabled:opacity-50 disabled:cursor-not-allowed
-           active:scale-[0.98];
+           active:scale-[0.98] no-zoom;
   }
   .btn-primary {
     background-color: rgb(var(--nb-accent));
@@ -117,8 +117,13 @@
     color: rgb(var(--nb-ink));
   }
   .btn-icon {
-    @apply inline-flex h-9 w-9 items-center justify-center rounded-full
-           text-muted transition-all active:scale-95;
+    /* 44×44 minimum touch target on touch devices, h-9 (36px) on
+       desktop. The hit area extends via the `touch-target` utility,
+       so the visible icon stays small on desktop while mobile
+       fingers get a comfortable target. */
+    @apply inline-flex h-9 w-9 touch-target items-center justify-center
+           rounded-full text-muted transition-all active:scale-95
+           no-zoom;
   }
   .btn-icon:hover:not(:disabled) {
     background-color: rgb(var(--nb-surface-tint));
@@ -348,5 +353,52 @@
   }
   .prose-chat h3:first-child {
     @apply mt-0;
+  }
+}
+/* =========================================================================
+   PWA + mobile polish
+   - safe-area-inset for iOS notch / Android edge-to-edge
+   - 44×44 minimum touch target (Apple HIG, Material A11y)
+   - smooth scroll on body so keyboard-triggered scroll doesn't jolt
+   ========================================================================= */
+@layer utilities {
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pl-safe { padding-left: env(safe-area-inset-left); }
+  .pr-safe { padding-right: env(safe-area-inset-right); }
+  .p-safe {
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+  }
+  /* 44×44 is the WCAG/HIG minimum interactive area. The visual
+     icon can be smaller; the clickable box is what counts. */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Disable double-tap zoom on buttons (mobile Safari). */
+  .no-zoom {
+    touch-action: manipulation;
+  }
+}
+
+@layer base {
+  html, body {
+    /* Mobile Safari: overscroll background = nb-canvas so the URL
+       bar / pull-to-refresh don't show a stark white flash. */
+    background-color: rgb(var(--nb-canvas));
+    overscroll-behavior-y: contain;
+  }
+  /* On devices with a notch the page would otherwise sit under
+     the status bar. body gets safe-area padding; individual
+     sticky/fixed panels opt into the .p-safe / .pt-safe utilities
+     for fine-grained control. */
+  body.has-notch {
+    padding-top: env(safe-area-inset-top);
   }
 }
