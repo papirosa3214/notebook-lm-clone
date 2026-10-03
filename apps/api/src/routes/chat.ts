@@ -44,7 +44,7 @@ async function resolveScopedSources(
   return { ids: found.map((r) => r.id) };
 }
 
-function mapChunk(c: RetrievalChunk): CitationChunk {
+export function mapChunk(c: RetrievalChunk): CitationChunk {
   return {
     id: c.id,
     sourceId: c.sourceId ?? c.doc_id,

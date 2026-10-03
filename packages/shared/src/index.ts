@@ -59,10 +59,91 @@ export const ArtifactSchema = z.object({
   notebookId: z.string(),
   title: z.string(),
   contentMd: z.string(),
+  // 'note' (default — pure markdown) or 'audio_overview'. UI uses it to
+  // decide between markdown preview and audio player.
+  kind: z.enum(['note', 'audio_overview']).default('note'),
+  // JSON-encoded metadata. For 'note' it stays null; for 'audio_overview'
+  // it carries the AudioOverviewMeta shape (see below). Left as a free
+  // string so future artifact kinds (table, flashcards, report, …) can
+  // add their own metadata without a schema migration.
+  meta: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
+
+// === Audio Overview ======================================================
+// Audio Overview is a two-host podcast dialogue generated from notebook
+// sources. The flow is: (1) LLM writes a script as alternating SCRIPT: /
+// MIRA: lines, persisted as an artifact with kind='audio_overview';
+// (2) a TTS provider renders the script to an mp3; (3) the artifact
+// carries metadata so the UI can show progress, duration, and the audio
+// player without re-fetching the source.
+
+export const AudioOverviewStyleSchema = z.enum(['deep_dive', 'short', 'critique']);
+export type AudioOverviewStyle = z.infer<typeof AudioOverviewStyleSchema>;
+
+export const AudioOverviewStatusSchema = z.enum([
+  'pending',     // job accepted, script not started
+  'scripting',   // LLM is writing the script
+  'synthesizing',// TTS in progress
+  'ready',       // mp3 on disk, playable
+  'failed',      // see error field
+]);
+export type AudioOverviewStatus = z.infer<typeof AudioOverviewStatusSchema>;
+
+/**
+ * One line of an Audio Overview script. Either a host turn (SCRIPT/MIRA)
+ * or a stage direction (PAUSE, MUSIC) — stage directions let the script
+ * model break up the dialogue for natural pacing.
+ */
+export const AudioOverviewLineSchema = z.object({
+  speaker: z.enum(['SCRIPT', 'MIRA', 'STAGE']),
+  text: z.string().min(1),
+});
+export type AudioOverviewLine = z.infer<typeof AudioOverviewLineSchema>;
+
+export const AudioOverviewRequestSchema = z.object({
+  /** "deep_dive" (default) ≈ 1500-2000 words, "short" ≈ 500, "critique" adversarial. */
+  style: AudioOverviewStyleSchema.default('deep_dive'),
+  /** Optional user instruction appended to the system prompt. */
+  focus: z.string().max(500).optional(),
+  /** Restrict the script to these sources (same validation as chat sourceIds). */
+  sourceIds: z.array(z.string().min(1)).max(50).optional(),
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+});
+export type AudioOverviewRequest = z.infer<typeof AudioOverviewRequestSchema>;
+
+/** Persisted shape of an Audio Overview artifact's metadata. */
+export const AudioOverviewMetaSchema = z.object({
+  status: AudioOverviewStatusSchema,
+  style: AudioOverviewStyleSchema,
+  /** Number of SCRIPT:/MIRA: lines actually generated. */
+  lineCount: z.number().int().min(0),
+  /** Seconds of synthesised audio, null until status='ready'. */
+  durationSec: z.number().min(0).nullable(),
+  /** Filename of the mp3 inside data/audio/{notebookId}/, null if not rendered yet. */
+  audioFilename: z.string().nullable(),
+  /** Model id used for the script (and TTS, if known). */
+  model: z.string().nullable(),
+  /** Set when status='failed'. */
+  error: z.string().nullable(),
+  /** ISO timestamps for status transitions. */
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AudioOverviewMeta = z.infer<typeof AudioOverviewMetaSchema>;
+
+/** Discriminated SSE delta. Mirrors the chat pattern. */
+export const AudioOverviewDeltaSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('meta'), meta: AudioOverviewMetaSchema }),
+  z.object({ type: z.literal('script_line'), line: AudioOverviewLineSchema }),
+  z.object({ type: z.literal('progress'), stage: z.enum(['scripting', 'synthesizing']), ratio: z.number().min(0).max(1), message: z.string().optional() }),
+  z.object({ type: z.literal('done'), artifactId: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type AudioOverviewDelta = z.infer<typeof AudioOverviewDeltaSchema>;
 
 // === Chat history row (server-side persistence) ===
 // Each row is one turn of a chat conversation. Used by the API to return

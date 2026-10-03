@@ -39,6 +39,12 @@ const schema = z.object({
   RERANK_HTTP_URL: z.string().url().optional(),
   RERANK_HTTP_MODEL: z.string().optional(),
   RERANK_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(30_000),
+
+  // Audio Overview TTS provider. Pluggable; default 'noop' means
+  // script-only mode (no audio is rendered, artifact has status='ready'
+  // with audioFilename=null). Real engines (openai / mac-say / kokoro)
+  // are stubbed in the factory and will land in subsequent commits.
+  TTS_PROVIDER: z.enum(['noop', 'openai', 'mac-say', 'kokoro']).default('noop'),
 });
 
 const parsed = schema.safeParse(process.env);

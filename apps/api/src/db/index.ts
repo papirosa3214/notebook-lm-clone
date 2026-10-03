@@ -194,6 +194,16 @@ function migrate(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sources', 'summary', 'TEXT');
   addColumnIfMissing(sqlite, 'sources', 'summary_topics', 'TEXT');
   addColumnIfMissing(sqlite, 'sources', 'summarized_at', 'TEXT');
+
+  // Audio Overview (Milestone B). artifacts.kind + artifacts.meta.
+  // Existing rows backfill kind='note' implicitly through the SQL default.
+  addColumnIfMissing(
+    sqlite,
+    'artifacts',
+    'kind',
+    `TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'audio_overview'))`,
+  );
+  addColumnIfMissing(sqlite, 'artifacts', 'meta', 'TEXT');
 }
 
 function addColumnIfMissing(

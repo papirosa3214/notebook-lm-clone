@@ -46,6 +46,17 @@ export const artifacts = sqliteTable('artifacts', {
     .references(() => notebooks.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   contentMd: text('content_md').notNull(),
+  // 'note' (default — pure markdown) or 'audio_overview' (script + audio).
+  // Picked by the create endpoint; UI uses it to decide between markdown
+  // preview and audio player.
+  kind: text('kind', { enum: ['note', 'audio_overview'] })
+    .notNull()
+    .default('note'),
+  // JSON-encoded artifact-specific metadata. For audio_overview this is
+  // AudioOverviewMeta (status, lineCount, durationSec, audioFilename, …).
+  // For 'note' it stays null. Adding new artifact kinds shouldn't require
+  // a migration — just extend the meta schema in shared/.
+  meta: text('meta'),
   createdAt: text('created_at').notNull().default(isoNow),
   updatedAt: text('updated_at').notNull().default(isoNow),
 });
