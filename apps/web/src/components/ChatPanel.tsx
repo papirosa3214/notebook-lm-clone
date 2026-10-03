@@ -10,6 +10,7 @@ import {
 import type { ChatMessage, CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
 import { SummaryCard } from './SummaryCard';
+import { CitationChip } from './CitationChip';
 import {
   SendIcon,
   StopIcon,
@@ -584,25 +585,14 @@ function renderInline(
     if (cite) {
       const n = Number(cite[1]);
       const chunk = citations?.[n - 1];
-      if (chunk && onOpenCitation) {
-        parts.push(
-          <button
-            key={`c-${key++}`}
-            type="button"
-            onClick={() => onOpenCitation(chunk, n - 1)}
-            className="chip-indigo mx-0.5 cursor-pointer align-baseline transition-all hover:brightness-95"
-            title={chunk.text}
-          >
-            [{n}]
-          </button>,
-        );
-      } else {
-        parts.push(
-          <span key={`c-${key++}`} className="chip-indigo mx-0.5 align-baseline">
-            [{n}]
-          </span>,
-        );
-      }
+      parts.push(
+        <CitationChip
+          key={`c-${key++}`}
+          index={n}
+          chunk={chunk}
+          onOpenCitation={onOpenCitation}
+        />,
+      );
       i += cite[0].length;
     } else if (bold) {
       parts.push(<strong key={`b-${key++}`}>{bold[1]}</strong>);

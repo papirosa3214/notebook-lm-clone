@@ -221,6 +221,17 @@
     color: rgb(195 180 255);
     background-color: rgb(var(--nb-ai-glow) / 0.22);
   }
+  /* Citation marker that points at a chunk the model was never shown
+     (sanitiser would have rewritten it to `[?]`, but the model can also
+     output raw `[N]` for an out-of-range slot). Visually muted so the
+     user notices the gap. */
+  .chip-muted {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+    background-color: rgb(var(--nb-surface-tint));
+    color: rgb(var(--nb-muted));
+    text-decoration: line-through;
+    text-decoration-color: rgb(var(--nb-muted) / 0.4);
+  }
   .kind-pill {
     @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm;
     background-color: rgb(var(--nb-accent-soft));
