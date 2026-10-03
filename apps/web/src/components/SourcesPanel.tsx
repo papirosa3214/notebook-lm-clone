@@ -10,6 +10,7 @@ import type {
 } from '../lib/types';
 import { SourceDetailSheet } from './SourceDetailSheet';
 import { useSourceScopeContext } from '../lib/sourceScopeContext';
+import { isSourceInScope } from '../lib/useSourceScope';
 import {
   SourceIcon,
   PlusIcon,
@@ -105,14 +106,14 @@ export function SourcesPanel({ notebookId }: Props) {
           )}
         </h2>
         <div className="flex items-center gap-1">
-          {scope && scope.hasReady && (
+          {scope && scope.hasReady && isScoped && (
             <button
               type="button"
-              onClick={() => (isScoped ? scope.selectAll() : scope.clear())}
+              onClick={() => scope.selectAll()}
               className="rounded-full px-2 py-1 text-[11px] font-medium text-muted hover:text-ink"
-              title={isScoped ? 'Сбросить выбор — все готовые' : 'Снять выбор — пустой чат'}
+              title="Сбросить выбор — все готовые источники"
             >
-              {isScoped ? 'Все' : 'Снять выбор'}
+              Все
             </button>
           )}
           <button
@@ -158,7 +159,11 @@ export function SourcesPanel({ notebookId }: Props) {
               source={s}
               onSelect={() => setOpenSource(s)}
               onDelete={() => setPendingDelete(s)}
-              selected={scope ? scope.selectedIds.includes(s.id) : true}
+              selected={
+                scope
+                  ? isSourceInScope(s.id, scope.selectedIds, scope.readyIds)
+                  : true
+              }
               onToggle={
                 scope && s.status === 'ready'
                   ? () => scope.toggle(s.id)

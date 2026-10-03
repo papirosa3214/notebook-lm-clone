@@ -161,3 +161,19 @@ export function scopeToSourceIds(
   if (selectedIds.length === readyIds.length) return undefined;
   return selectedIds;
 }
+
+/**
+ * Return the checkbox state for one ready source. The persisted empty array
+ * means "all ready sources", so it must render as checked rather than as an
+ * apparently empty chat scope.
+ */
+export function isSourceInScope(
+  sourceId: string,
+  selectedIds: string[],
+  readyIds: string[],
+): boolean {
+  if (selectedIds.length === 0 || selectedIds.length === readyIds.length) {
+    return readyIds.includes(sourceId);
+  }
+  return selectedIds.includes(sourceId);
+}
