@@ -69,6 +69,7 @@ export function SourcesPanel({ notebookId }: Props) {
 
   const [showAddUrl, setShowAddUrl] = useState(false);
   const [showAddYt, setShowAddYt] = useState(false);
+  const [showAddYtAsr, setShowAddYtAsr] = useState(false);
   const [showAddFile, setShowAddFile] = useState(false);
   const [showAddSearch, setShowAddSearch] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
@@ -129,6 +130,7 @@ export function SourcesPanel({ notebookId }: Props) {
       <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
         <AddCircle label="URL" onClick={() => setShowAddUrl(true)} kind="url" />
         <AddCircle label="YouTube" onClick={() => setShowAddYt(true)} kind="youtube" />
+        <AddCircle label="YouTube → ASR" onClick={() => setShowAddYtAsr(true)} kind="youtube" />
         <AddCircle label="Файл" onClick={() => setShowAddFile(true)} kind="file" />
         <AddCircle
           label="Discover"
@@ -169,6 +171,9 @@ export function SourcesPanel({ notebookId }: Props) {
 
       {showAddUrl && <AddUrlDialog notebookId={notebookId} onClose={() => setShowAddUrl(false)} />}
       {showAddYt && <AddYoutubeDialog notebookId={notebookId} onClose={() => setShowAddYt(false)} />}
+      {showAddYtAsr && (
+        <AddYoutubeAsrDialog notebookId={notebookId} onClose={() => setShowAddYtAsr(false)} />
+      )}
       {showAddFile && <AddFileDialog notebookId={notebookId} onClose={() => setShowAddFile(false)} />}
       {showAddSearch && (
         <DiscoverDialog notebookId={notebookId} onClose={() => setShowAddSearch(false)} />
@@ -671,6 +676,94 @@ function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose
             <button type="submit" className="btn btn-primary" disabled={!url}>
               <PlusIcon size={13} />
               Добавить
+            </button>
+          </div>
+        </form>
+      )}
+      {(running || progress.error) && <ProgressStepper progress={progress} />}
+      {progress.error && (
+        <div className="mt-4 flex justify-end">
+          <button type="button" onClick={onClose} className="btn btn-secondary">
+            Закрыть
+          </button>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+// ============================================================
+// YouTube → ASR — local Whisper pipeline (slower than transcript,
+// but works when YouTube requires login to expose captions)
+// ============================================================
+
+function AddYoutubeAsrDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [url, setUrl] = useState('');
+  const [title, setTitle] = useState('');
+  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+  const [running, setRunning] = useState(false);
+
+  function start() {
+    if (!url || running) return;
+    setRunning(true);
+    setProgress(INITIAL_PROGRESS);
+    const stream = api.ingestYoutubeAsrSourceStream(
+      notebookId,
+      { url, title: title || undefined },
+      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
+    );
+    stream.promise
+      .then(() => {
+        qc.invalidateQueries({ queryKey: ['sources', notebookId] });
+        onClose();
+      })
+      .catch((err: Error) => setProgress((p) => ({ ...p, error: err.message })))
+      .finally(() => setRunning(false));
+  }
+
+  return (
+    <Dialog title="YouTube → распознать" onClose={onClose}>
+      {!running && !progress.error && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            start();
+          }}
+          className="space-y-3"
+        >
+          <p className="text-sm text-muted-foreground">
+            Скачает аудио через <code>yt-dlp</code> и распознает речь локальным
+            Whisper на <code>127.0.0.1:8000</code>. Медленнее, чем обычный
+            YouTube (ещё скачивание + ASR), но работает там, где YouTube не
+            отдаёт сабы.
+          </p>
+          <div>
+            <label className="section-label mb-1.5 block">URL или ID видео</label>
+            <input
+              className="input"
+              placeholder="https://youtube.com/watch?v=…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              autoFocus
+              required
+            />
+          </div>
+          <div>
+            <label className="section-label mb-1.5 block">Название (опционально)</label>
+            <input
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn btn-secondary">
+              Отмена
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={!url}>
+              <PlusIcon size={13} />
+              Распознать
             </button>
           </div>
         </form>

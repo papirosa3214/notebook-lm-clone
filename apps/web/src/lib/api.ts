@@ -75,6 +75,18 @@ export const api = {
       onProgress,
     );
   },
+  ingestYoutubeAsrSourceStream(
+    notebookId: string,
+    body: { url: string; title?: string },
+    onProgress?: (delta: IngestProgressDelta) => void,
+  ): { promise: Promise<Source>; abort: () => void } {
+    return openIngestStream(
+      `/api/notebooks/${notebookId}/sources/youtube-asr?stream=1`,
+      body,
+      notebookId,
+      onProgress,
+    );
+  },
   ingestSearchAddBatchStream(
     notebookId: string,
     body: { urls: string[] },
