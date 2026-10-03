@@ -185,9 +185,38 @@ hover popover показывает snippet + кнопку перехода в so
   10 unit для `FlashcardDeck` (default/flip/next/wrap/reset/
   mark/auto-advance/known/unknown/counters/JSON-string/empty).
 
-### C3. Data Table (следующая итерация)
-- LLM извлекает из источников сущности + атрибуты, форсит markdown-таблицу.
-- `Artifact { kind: 'table' }`, рендерится с фильтрами/сортировкой.
+### C3. Data Table — **сделано** (текущая ветка: `ee00152` + `5b0741d` + web-коммиты)
+- `packages/shared`: `StudioTemplate: 'data_table'`, `DataTable` (title?,
+  columns, rows), `StudioReportMeta.{columnCount, rowCount}`.
+- `apps/api/src/lib/studio/templates.ts`: data_table user-prompt с
+  жёстким требованием JSON `{title, columns, rows}` — 3-7 колонок,
+  5-30 строк, ячейки до 200 символов.
+- `apps/api/src/routes/studio.ts`:
+  - `parseDataTableStream(text)` — tolerant fence + leading prose;
+    нормализует columns (trim/dedupe/cap@20), rows (только cells с
+    известными колонками, cap@500, drop пустых), coerces non-string
+    values к string.
+  - При total-failure → fallback `[{columns:['Результат'], rows:[{Результат:'Нет данных'}]}]`,
+    чтобы UI не падал.
+  - persist: `contentMd = JSON.stringify(table)`,
+    `meta.columnCount` + `meta.rowCount`.
+- UI: `DataTableView` + интеграция в `ArtifactsPanel`.
+  - Sortable columns (click header, click again to flip direction)
+  - Case-insensitive substring filter
+  - "сбросить сортировку" link
+  - Empty placeholder для invalid JSON
+  - Plural: 1 столбец / 2-4 столбца / 5+ столбцов
+- Тесты: 11 unit для `parseDataTableStream` (clean JSON, fence,
+  prose, partial rows, extra keys, coercion, dedup, null на
+  garbage, row cap 500), 2 e2e (happy path + fallback), 7 unit
+  для `DataTableView` (default render, sort + flip, filter,
+  empty state, JSON-string body, invalid JSON, reset sort).
+
+**Studio v1 закрыт полностью:** Reports (FAQ / TL;DR / Timeline /
+Contradictions) + Flashcards + Data Table. Все шесть шаблонов
+работают end-to-end (backend + UI + tests), персистятся как
+Artifact kind='report' с разным template в meta и разным
+contentMd (markdown для reports, JSON для flashcards/data_table).
 
 ---
 
