@@ -28,6 +28,17 @@ const schema = z.object({
   // Path to a Netscape-format cookies.txt for yt-dlp (optional). Required
   // for YouTube downloads without bot walls; empty disables cookies.
   YT_COOKIES_PATH: z.string().optional(),
+
+  // Rerank provider. Pluggable so we can swap the slow LLM-rerank for a
+  // TEI-hosted cross-encoder (bge-reranker-v2-m3) without touching the
+  // retrieval pipeline. `llm` is the default and works without extra
+  // infrastructure; `http` requires a TEI / FlagEmbedding / Infinity
+  // server reachable at RERANK_HTTP_URL; `noop` disables rerank entirely
+  // (RRF merge alone).
+  RERANK_PROVIDER: z.enum(['llm', 'http', 'noop']).default('llm'),
+  RERANK_HTTP_URL: z.string().url().optional(),
+  RERANK_HTTP_MODEL: z.string().optional(),
+  RERANK_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(30_000),
 });
 
 const parsed = schema.safeParse(process.env);

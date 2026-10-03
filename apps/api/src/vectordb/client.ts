@@ -294,8 +294,11 @@ export async function retrieveWithRerank(
   const CANDIDATE_POOL = 16;
   const candidates = await retrieveRaw(notebookId, question, CANDIDATE_POOL, true, opts.sourceIds);
   if (candidates.length <= 1) return candidates;
-  const { rerank } = await import('../lib/rerank.js');
-  return rerank(question, candidates, { topN: topK, ...opts });
+  const { getRerankProvider } = await import('../lib/rerank/factory.js');
+  return getRerankProvider().rerank(question, candidates, topK, {
+    provider: opts.provider,
+    model: opts.model,
+  });
 }
 
 async function retrieveRaw(
