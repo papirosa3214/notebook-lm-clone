@@ -14,6 +14,26 @@ export class VectorDbError extends Error {
   }
 }
 
+// FTS5 treats whitespace-separated terms as AND. That works for a compact
+// keyword query, but a natural-language question such as "Как правильно
+// настроить взаимодействие между агентами?" would require every chunk to
+// contain every word and therefore often returns no context at all. Keep only
+// meaningful terms and join them with OR; dense retrieval and RRF still do the
+// precision work when embeddings are available.
+const FTS_STOP_WORDS = new Set([
+  'а', 'без', 'бы', 'в', 'во', 'вы', 'для', 'до', 'же', 'за', 'и', 'из', 'или',
+  'их', 'как', 'к', 'ко', 'ли', 'между', 'мы', 'на', 'над', 'не', 'но', 'о',
+  'об', 'он', 'она', 'они', 'от', 'по', 'под', 'при', 'с', 'со', 'такое', 'ты',
+  'у', 'что', 'это', 'этот', 'эта', 'эти', 'я',
+]);
+
+/** Build a safe, recall-oriented FTS5 expression from a user question. */
+export function buildFtsQuery(question: string): string | null {
+  const tokens = question.toLocaleLowerCase('ru-RU').match(/[\p{L}\p{N}]+/gu) ?? [];
+  const terms = [...new Set(tokens.filter((token) => token.length > 1 && !FTS_STOP_WORDS.has(token)))];
+  return terms.length > 0 ? terms.join(' OR ') : null;
+}
+
 // =========== Embeddings =========
 
 /** Call Ollama embeddings API. Times out at 60 s — Ollama stalls long enough
@@ -302,27 +322,8 @@ async function retrieveRaw(
   const cached = retrievalCache.get({ notebookId, question, topK, sourceIds });
   if (cached) return cached as RetrievalChunk[];
 
-  const vec = await embed(question);
   const sqlite = getRawSqlite();
-  // KNN: sqlite-vec returns distance in [0..2] for cosine (0 = identical).
-  const rows = sqlite
-    .prepare(
-      `SELECT c.id AS chunk_pk,
-              c.source_id AS source_id,
-              c.title AS title,
-              c.url AS url,
-              c.content AS content,
-              c.kind AS kind,
-              c.ordinal AS ordinal,
-              v.distance AS distance
-       FROM vec_chunks v
-       JOIN chunks c ON c.vec_rowid = v.rowid
-       WHERE v.embedding MATCH ? AND k = ?
-         AND c.notebook_id = ?${sourceFilter}
-       ORDER BY v.distance
-       LIMIT ?`,
-    )
-    .all(Buffer.from(vec.buffer), topK, notebookId, ...sourceParams, topK) as Array<{
+  type DenseRow = {
     chunk_pk: number;
     source_id: string;
     title: string;
@@ -331,7 +332,65 @@ async function retrieveRaw(
     kind: 'url' | 'file' | 'youtube';
     ordinal: number;
     distance: number;
-  }>;
+  };
+  let rows: DenseRow[] = [];
+  try {
+    const vec = await embed(question);
+    // KNN: sqlite-vec returns distance in [0..2] for cosine (0 = identical).
+    rows = sqlite
+      .prepare(
+        `SELECT c.id AS chunk_pk,
+                c.source_id AS source_id,
+                c.title AS title,
+                c.url AS url,
+                c.content AS content,
+                c.kind AS kind,
+                c.ordinal AS ordinal,
+                v.distance AS distance
+         FROM vec_chunks v
+         JOIN chunks c ON c.vec_rowid = v.rowid
+         WHERE v.embedding MATCH ? AND k = ?
+           AND c.notebook_id = ?${sourceFilter}
+         ORDER BY v.distance
+         LIMIT ?`,
+      )
+      .all(Buffer.from(vec.buffer), topK, notebookId, ...sourceParams, topK) as DenseRow[];
+  } catch {
+    // A chat must remain grounded when the embedding server is restarting or
+    // unavailable. The lexical branch below is independent of Ollama.
+    rows = [];
+  }
+
+  const ftsQuery = buildFtsQuery(question);
+  const ftsRows = ftsQuery
+    ? (sqlite
+        .prepare(
+          `SELECT c.id AS chunk_pk,
+                  c.source_id AS source_id,
+                  c.title AS title,
+                  c.url AS url,
+                  c.content AS content,
+                  c.kind AS kind,
+                  c.ordinal AS ordinal,
+                  bm25(chunks_fts) AS bm25_score
+           FROM chunks_fts
+           JOIN chunks c ON c.id = chunks_fts.rowid
+           WHERE chunks_fts MATCH ?
+             AND c.notebook_id = ?${sourceFilter}
+           ORDER BY bm25_score
+           LIMIT ?`,
+        )
+        .all(ftsQuery, notebookId, ...sourceParams, topK) as Array<{
+    chunk_pk: number;
+    source_id: string;
+    title: string;
+    url: string | null;
+    content: string;
+    kind: 'url' | 'file' | 'youtube';
+    ordinal: number;
+    bm25_score: number;
+  }>)
+    : [];
 
   // Hybrid retrieval: dense (sqlite-vec) + lexical (FTS5 BM25), merged
   // with Reciprocal Rank Fusion. We fetch topK from each side so the
@@ -343,34 +402,6 @@ async function retrieveRaw(
   // shows up in BOTH lists scores higher than one that shows up in
   // only one — that's the whole point of the merge.
   const K0 = 60;
-  const ftsRows = sqlite
-    .prepare(
-      `SELECT c.id AS chunk_pk,
-              c.source_id AS source_id,
-              c.title AS title,
-              c.url AS url,
-              c.content AS content,
-              c.kind AS kind,
-              c.ordinal AS ordinal,
-              bm25(chunks_fts) AS bm25_score
-       FROM chunks_fts
-       JOIN chunks c ON c.id = chunks_fts.rowid
-       WHERE chunks_fts MATCH ?
-         AND c.notebook_id = ?${sourceFilter}
-       ORDER BY bm25_score
-       LIMIT ?`,
-    )
-    .all(question, notebookId, ...sourceParams, topK) as Array<{
-    chunk_pk: number;
-    source_id: string;
-    title: string;
-    url: string | null;
-    content: string;
-    kind: 'url' | 'file' | 'youtube';
-    ordinal: number;
-    bm25_score: number;
-  }>;
-
   type Hit = {
     chunk_pk: number;
     source_id: string;
