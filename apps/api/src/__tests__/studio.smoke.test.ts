@@ -180,4 +180,51 @@ describe('POST /api/notebooks/:id/artifacts/studio', () => {
     const body = res.json() as { error: string };
     expect(body.error).toMatch(/готовых источников/);
   });
+
+  it('persists flashcards as a JSON FlashcardSet with kind="report" and flashcardCount', async () => {
+    // Mock Ollama to emit a realistic flashcards payload (with the
+    // typical ```json fence + leading prose the real model uses).
+    const llmPayload = [
+      'Вот ваши карточки:',
+      '```json',
+      JSON.stringify([
+        { question: 'Что такое A2A?', answer: 'Протокол делегирования задач между агентами [1].' },
+        { question: 'Кто выпустил A2A?', answer: 'Google в 2025.' },
+        { question: 'Чем A2A отличается от MCP?', answer: 'A2A — про межагентное взаимодействие, MCP — про доступ агента к инструментам.' },
+      ]),
+      '```',
+    ].join('\n');
+    env.mockOllama({ chatText: llmPayload });
+    const app = await env.getApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/notebooks/${NB_ID}/artifacts/studio`,
+      payload: { template: 'flashcards' },
+    });
+    expect(res.statusCode).toBe(200);
+    const db = await env.getDb();
+    const all = db
+      .select()
+      .from((await import('../db/schema.js')).artifacts)
+      .where((await import('drizzle-orm')).eq((await import('../db/schema.js')).artifacts.notebookId, NB_ID))
+      .all();
+    // The flashcards artifact is the one with kind='report' and
+    // a JSON body. (Note: prior tests in this file use the same NB_ID
+    // and may have created an artifact; we filter by template.)
+    const flashcardArtifact = all.find((a) => {
+      if (a.kind !== 'report' || !a.meta) return false;
+      const meta = JSON.parse(a.meta) as { template?: string };
+      return meta.template === 'flashcards';
+    });
+    expect(flashcardArtifact, 'flashcards artifact should be persisted').toBeDefined();
+    if (!flashcardArtifact) return;
+    const meta = JSON.parse(flashcardArtifact.meta!) as { template: string; flashcardCount: number; citationCount: number };
+    expect(meta.template).toBe('flashcards');
+    expect(meta.flashcardCount).toBe(3);
+    // contentMd must be a valid FlashcardSet JSON.
+    const set = JSON.parse(flashcardArtifact.contentMd) as { cards: Array<{ id: string; question: string; answer: string }> };
+    expect(set.cards).toHaveLength(3);
+    expect(set.cards[0]!.question).toBe('Что такое A2A?');
+    expect(set.cards[0]!.id.length).toBeGreaterThan(4);
+  });
 });
