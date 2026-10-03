@@ -6,9 +6,15 @@ import { defineConfig } from 'vitest/config';
  * browser and the running dev stack. Including them in vitest causes
  * failures (Playwright's `test` import isn't available there) and slows
  * down the unit-test feedback loop.
+ *
+ * The default environment is node; component tests opt into jsdom via
+ * `// @vitest-environment jsdom` at the top of the file. That keeps the
+ * cold-start cost of pure-logic suites (ruPlural, chatHistory) minimal
+ * while letting react-testing-library work where we need it.
  */
 export default defineConfig({
   test: {
     exclude: ['node_modules', 'dist', 'e2e/**'],
+    setupFiles: ['./src/test-setup.ts'],
   },
 });
