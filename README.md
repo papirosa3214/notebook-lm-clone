@@ -165,7 +165,7 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `POST /api/notebooks/:id/discover/ingest` | Подтвердить и ингестить preview URL'ы |
 | `GET /api/notebooks/:id/artifacts` | Список артефактов |
 | `POST /api/notebooks/:id/artifacts` | Создать |
-| `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions) |
+| `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions / **flashcards**) |
 | `POST /api/notebooks/:id/artifacts/studio` | Сгенерировать Studio-отчёт (SSE: citations → token* → done), persist `kind='report'` |
 | `POST /api/notebooks/:id/share` | Включить read-only шаринг, вернуть `shareToken` + `shareUrl` |
 | `GET /api/notebooks/:id/share` | Текущее состояние шаринга |

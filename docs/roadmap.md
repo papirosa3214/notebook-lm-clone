@@ -160,11 +160,30 @@ hover popover показывает snippet + кнопку перехода в so
   happy path, unknown sourceIds, unknown template id, empty
   notebook).
 
-### C2. Flashcards / Quiz (следующая итерация)
-- LLM генерирует N пар «вопрос-ответ» (или multiple-choice).
-- Артефакт с `kind: 'flashcards'`.
-- Интерактивный режим в UI: flip card, пометки «знаю / не знаю», прогресс.
-- Persist прогресса в `artifact_progress` таблице.
+### C2. Flashcards / Quiz — **сделано** (`c962d82`, `a21e833`, текущая ветка — на текущей ветке)
+- `packages/shared`: `StudioTemplate` расширен `'flashcards'`,
+  добавлены `FlashcardSchema`, `FlashcardSetSchema`, опциональный
+  `StudioReportMeta.flashcardCount`.
+- `apps/api/src/lib/studio/templates.ts`: новый шаблон
+  `flashcards` с user-prompt, требующим JSON-массив
+  `{question, answer}` (10-20 пар, [N]-маркеры в ответах).
+- `apps/api/src/routes/studio.ts`:
+  - `parseFlashcardStream(text)` — tolerates fences, leading
+    prose, `//` comments; 60-card hard cap; выдаёт
+    `Flashcard[]` с `nanoid` id.
+  - После стрима, если `template==='flashcards'`, парсим,
+    валидируем через `FlashcardSetSchema`, persist'им
+    `contentMd` как JSON + `flashcardCount` в meta.
+  - Для других шаблонов поведение неизменно.
+- UI: `FlashcardDeck` + интеграция в `ArtifactsPanel`.
+  `isFlashcardArtifact()` распознаёт template как по
+  `meta.template`, так и по body-парсингу (legacy / shared view).
+  Flip-card, next/prev, keyboard (Space/Enter, ←/→), mark
+  «знаю / не знаю» + auto-advance, прогресс-бар, reset.
+- Тесты: 8 unit для `parseFlashcardStream`, 1 e2e для route
+  (artifact kind='report' с flashcardCount, валидный JSON body),
+  10 unit для `FlashcardDeck` (default/flip/next/wrap/reset/
+  mark/auto-advance/known/unknown/counters/JSON-string/empty).
 
 ### C3. Data Table (следующая итерация)
 - LLM извлекает из источников сущности + атрибуты, форсит markdown-таблицу.
