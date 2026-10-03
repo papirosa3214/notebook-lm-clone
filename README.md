@@ -167,6 +167,10 @@ data: {"type":"done","messageId":"abc123"}\n\n
 | `POST /api/notebooks/:id/artifacts` | Создать |
 | `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions) |
 | `POST /api/notebooks/:id/artifacts/studio` | Сгенерировать Studio-отчёт (SSE: citations → token* → done), persist `kind='report'` |
+| `POST /api/notebooks/:id/share` | Включить read-only шаринг, вернуть `shareToken` + `shareUrl` |
+| `GET /api/notebooks/:id/share` | Текущее состояние шаринга |
+| `DELETE /api/notebooks/:id/share` | Закрыть доступ (token → NULL) |
+| `GET /api/shared/:token` | Публичный read-only snapshot ноутбука (no auth, 404 на unknown/revoked) |
 | `GET /api/artifacts/:id` | Прочитать |
 | `PATCH /api/artifacts/:id` | Обновить title/contentMd |
 | `GET /api/artifacts/:id/download` | Скачать как `.md` |

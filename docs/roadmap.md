@@ -174,15 +174,31 @@ hover popover показывает snippet + кнопку перехода в so
 
 ## Milestone D — Sharing + Export (P1, M)
 
-### D1. Sharing (read-only)
-- `POST /api/notebooks/:id/share` → `shareToken` (random nanoid).
-- `GET /api/shared/:token` — без auth, JSON: notebook meta + sources titles +
-  артефакты.
-- `apps/web/src/pages/SharedNotebookPage.tsx` — viewer-mode (без chat,
-  без добавления источников).
-- `DELETE /api/notebooks/:id/share` — revoke.
+### D1. Sharing (read-only) — **сделано** (`3b9b9e6`..`a67a15e`)
+- `packages/shared`: `SharedNotebook`, `SharedSource`, `SharedArtifact`,
+  `NotebookShare` (enabled, shareToken, shareUrl, shareEnabledAt).
+- `apps/api/src/db/schema.ts` + миграция: `notebooks.share_token` +
+  `notebooks.share_enabled_at` через `addColumnIfMissing`.
+- `apps/api/src/config.ts`: `PUBLIC_BASE_URL` (опц., для билда
+  абсолютных share-ссылок в production).
+- `apps/api/src/routes/share.ts`:
+  - `POST   /api/notebooks/:id/share` → 201 + shareToken + shareUrl
+  - `GET    /api/notebooks/:id/share` → current state
+  - `DELETE /api/notebooks/:id/share` → 204; token → NULL
+  - `GET    /api/shared/:token` → public snapshot
+- Контракт безопасности:
+  - 404 для unknown / revoked / malformed token (НИКОГДА 401/403
+    — чтобы нельзя было probe'ить URL space)
+  - 404 для `../etc/passwd` и других traversal-форм
+  - projection: только безопасные поля (no chat history, no
+    chunk text, no provider/model, no API keys)
+  - contentPreview truncate до 300 символов + ellipsis
+- UI: `ShareDialog` (enable/copy/revoke) + кнопка «Поделиться» в
+  шапке + `SharedNotebookPage` (отдельная страница viewer-mode,
+  НЕ переиспользует NotebookPage).
+- Тесты: 4 owner + 5 public = 9 smoke.
 
-### D2. Export notebook (.zip)
+### D2. Export notebook (.zip) — **следующая итерация**
 - `GET /api/notebooks/:id/export.zip` — `archiver` или `zip-stream`.
 - Внутри: артефакты (.md), source markdown, `metadata.json` (источники,
   даты, опционально chat history), cover.
