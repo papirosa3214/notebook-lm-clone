@@ -24,11 +24,11 @@ describe('sanitizeCitations', () => {
   });
 
   it('treats [N] inside backticks as a normal marker — sanitiser is not a Markdown parser', () => {
-    // The backstop is intentionally not Markdown-aware: a stray `[1]` inside
-    // a code sample is rewritten the same way as outside it. The cost of
-    // rewriting a code sample is much smaller than the cost of letting an
-    // out-of-range citation through.
-    expect(sanitizeCitations('Use `array[1]` and `[2]` literally.', 2)).toBe(
+    // The backstop is intentionally not Markdown-aware: a stray out-of-range
+    // `[3]` inside a code sample is rewritten the same way as outside it.
+    // The cost of rewriting a code sample is much smaller than the cost of
+    // letting an out-of-range citation through.
+    expect(sanitizeCitations('Use `array[3]` and `[4]` literally.', 2)).toBe(
       'Use `array[?]` and `[?]` literally.',
     );
   });
