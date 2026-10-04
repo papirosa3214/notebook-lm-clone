@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../lib/api';
+import { AudioPlayer } from './AudioPlayer';
 import type {
   AudioOverviewDelta,
   AudioOverviewLine,
@@ -19,15 +20,12 @@ type Phase = 'idle' | 'running' | 'done' | 'error';
  * Audio Overview generation dialog.
  *
  * Drives the SSE script-generation stream and surfaces live progress
- * plus the parsed dialogue. The first iteration is script-only — the
- * TTS provider is `noop` by default, so the artifact's `audioFilename`
- * stays null. The dialog renders the script body as a "transcript"
- * (which is also what the Artifacts panel will show) and shows a
- * small "audio not rendered" hint when `meta.audioFilename` is null.
- *
- * When a real TTS engine lands (OpenAI / mac-say / kokoro) the only
- * change here will be swapping the hint for an `<audio controls>` tag
- * pointed at `api.audioUrl(notebookId, artifactId)`.
+ * plus the parsed dialogue. When the server has rendered an mp3
+ * (`meta.audioFilename !== null`), the dialog shows an inline
+ * `<audio>` player with download + a small meta row (style,
+ * lineCount, durationSec). When the artifact is script-only
+ * (TTS_PROVIDER=noop), the player is hidden and the existing
+ * "audio not rendered" hint is shown instead.
  */
 export function AudioOverviewDialog({ notebookId, onClose, onCreated }: Props) {
   const qc = useQueryClient();
@@ -143,8 +141,9 @@ export function AudioOverviewDialog({ notebookId, onClose, onCreated }: Props) {
             </div>
             <div className="flex items-center justify-between gap-2 pt-2">
               <p className="text-xs text-muted">
-                TTS сейчас в режиме <code>noop</code> — будет сгенерирован только
-                сценарий. Аудио появится после подключения TTS-провайдера.
+                Сценарий строится по источникам ноутбука. Если на сервере
+                включён TTS-провайдер (например <code>mac-say</code>), в
+                артефакт будет добавлен mp3; иначе — только текст.
               </p>
               <div className="flex gap-2">
                 <button type="button" onClick={onClose} className="btn btn-secondary">
@@ -161,6 +160,26 @@ export function AudioOverviewDialog({ notebookId, onClose, onCreated }: Props) {
         {(phase === 'running' || phase === 'done' || phase === 'error') && (
           <div className="space-y-3 px-5 py-4">
             <ProgressBar meta={meta} phase={phase} />
+            {phase === 'done' && meta?.audioFilename && (
+              <AudioPlayer
+                src={api.audioUrlByFilename(notebookId, meta.audioFilename)}
+                downloadName={meta.audioFilename}
+                title="Готовый подкаст"
+                meta={
+                  [
+                    meta.style,
+                    `${meta.lineCount} реплик`,
+                    meta.durationSec
+                      ? `${Math.floor(meta.durationSec / 60)}:${String(meta.durationSec % 60).padStart(2, '0')}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
+                }
+                onErrorHint="Не удалось загрузить mp3. Файл мог быть удалён или TTS не отрисовал аудио."
+                data-testid="audio-overview-player"
+              />
+            )}
             <div className="max-h-72 overflow-y-auto rounded-lg border bg-canvas p-3 text-sm"
               style={{ borderColor: 'rgb(var(--nb-border))' }}
               data-testid="audio-overview-transcript"

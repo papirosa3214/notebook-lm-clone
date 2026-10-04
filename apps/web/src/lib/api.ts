@@ -313,6 +313,17 @@ export const api = {
   audioUrl: (notebookId: string, artifactId: string) =>
     `/api/audio/${notebookId}/${artifactId}.mp3`,
 
+  /**
+   * Like `audioUrl` but takes the `meta.audioFilename` directly
+   * (e.g. `'abc123XYZ.mp3'`). The server's audio route accepts
+   * the full filename, so this is just a one-liner helper that
+   * keeps the call site readable. The two helpers are equivalent
+   * because artifactId and the mp3 basename are the same nanoid
+   * by construction.
+   */
+  audioUrlByFilename: (notebookId: string, audioFilename: string) =>
+    `/api/audio/${notebookId}/${audioFilename}`,
+
   // Sharing — owner side. The public side lives in `fetchSharedNotebook`
   // because it has no auth context and shouldn't be on the same shape
   // as the rest of the API.

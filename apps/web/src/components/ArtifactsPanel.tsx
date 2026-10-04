@@ -4,6 +4,8 @@ import { api } from '../lib/api';
 import type { Artifact } from '../lib/types';
 import { FlashcardDeck } from './FlashcardDeck';
 import { DataTableView } from './DataTableView';
+import { AudioPlayer } from './AudioPlayer';
+import type { AudioOverviewMeta } from '@notebook/shared';
 import {
   PlusIcon,
   CloseIcon,
@@ -122,6 +124,7 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
           <ArtifactEditor
             key={selected.id}
             artifact={selected}
+            notebookId={notebookId}
             onClose={() => setSelectedId(null)}
             onDelete={() => {
               if (confirm(`Удалить «${selected.title}»?`)) {
@@ -179,18 +182,22 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
 
 function ArtifactEditor({
   artifact,
+  notebookId,
   onClose,
   onDelete,
 }: {
   artifact: Artifact;
+  notebookId: string;
   onClose: () => void;
   onDelete: () => void;
 }) {
   // The editor detects Studio-generated structured artifacts by meta
   // and falls back to body-shape detection for legacy / shared rows.
-  // Three modes:
+  // Four modes:
   //   - report + template=flashcards → FlashcardDeck
   //   - report + template=data_table → DataTableView
+  //   - audio_overview → AudioPlayer + transcript textarea
+  //     (body is read-only — we still allow re-titling)
   //   - everything else → markdown textarea
   const specialRender = detectSpecialRender(artifact);
   const isReadonlyBody = specialRender !== 'markdown';
@@ -256,6 +263,24 @@ function ArtifactEditor({
           <DataTableView data={artifact.contentMd} />
         </div>
       )}
+      {specialRender === 'audio_overview' && (
+        <div className="flex flex-1 flex-col gap-3 overflow-y-auto">
+          <AudioOverviewPlayer
+            artifact={artifact}
+            notebookId={notebookId}
+          />
+          <label className="section-label">Сценарий</label>
+          <textarea
+            className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
+            value={contentMd}
+            onChange={(e) => {
+              setContentMd(e.target.value);
+              setDirty(true);
+            }}
+            placeholder="Markdown-сценарий подкаста…"
+          />
+        </div>
+      )}
       {specialRender === 'markdown' && (
         <>
           <textarea
@@ -278,11 +303,116 @@ function ArtifactEditor({
   );
 }
 
+/** Render an audio_overview artifact's player + meta header. The
+ *  underlying `AudioPlayer` is generic (any src); this wrapper
+ *  pulls the right URL out of the artifact + parses the meta. */
+function AudioOverviewPlayer({
+  artifact,
+  notebookId,
+}: {
+  artifact: Artifact;
+  notebookId: string;
+}) {
+  const audioFilename = parseAudioFilename(artifact.meta);
+  if (!audioFilename) {
+    // Script-only (TTS_PROVIDER=noop) — nothing to play, but we
+    // still hint that the user can re-generate to get an mp3.
+    return (
+      <div
+        className="rounded-2xl border bg-surface px-3 py-2.5 text-xs text-muted"
+        style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}
+        data-testid="audio-overview-player-empty"
+      >
+        Аудио не отрисовано (TTS_PROVIDER=noop) — артефакт содержит
+        только сценарий.
+      </div>
+    );
+  }
+  const status = parseStatus(artifact.meta);
+  return (
+    <div className="space-y-1.5" data-testid="audio-overview-player">
+      <AudioPlayer
+        src={api.audioUrlByFilename(notebookId, audioFilename)}
+        downloadName={audioFilename}
+        title="Готовый подкаст"
+        meta={
+          [
+            artifact.meta ? styleFromMeta(artifact.meta) : null,
+            `${lineCountFromContent(artifact.contentMd)} реплик`,
+            durationFromMeta(artifact.meta),
+          ]
+            .filter(Boolean)
+            .join(' · ') || undefined
+        }
+        onErrorHint="Не удалось загрузить mp3. Файл мог быть удалён или ещё рендерится."
+      />
+      {status === 'failed' && (
+        <p className="text-[11px] text-red-600">
+          TTS упал на этапе рендеринга. Перегенерируйте артефакт.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function parseAudioFilename(metaStr: string | null | undefined): string | null {
+  if (!metaStr) return null;
+  try {
+    const m = JSON.parse(metaStr) as { audioFilename?: string | null };
+    return m.audioFilename ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseStatus(metaStr: string | null | undefined): string | null {
+  if (!metaStr) return null;
+  try {
+    const m = JSON.parse(metaStr) as { status?: string };
+    return m.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function styleFromMeta(metaStr: string | null | undefined): string | null {
+  if (!metaStr) return null;
+  try {
+    const m = JSON.parse(metaStr) as { style?: string };
+    return m.style ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function durationFromMeta(metaStr: string | null | undefined): string | null {
+  if (!metaStr) return null;
+  try {
+    const m = JSON.parse(metaStr) as { durationSec?: number | null };
+    if (typeof m.durationSec !== 'number' || m.durationSec <= 0) return null;
+    const sec = m.durationSec;
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Quick parse of the SCRIPT/MIRA/STAGE line count from the markdown
+ *  body — we only need it for the meta hint, so a regex is enough. */
+function lineCountFromContent(contentMd: string): number {
+  const matches = contentMd.match(/^\s*(?:[*_`-]?\s*)?(?:SCRIPT|MIRA|STAGE)\s*[:]/gim);
+  return matches?.length ?? 0;
+}
+
 /** Discriminator for the structured Studio renderers. We check
  *  `meta.template` first (cheap, no JSON parse of the body) and
  *  fall back to body-shape detection for legacy / shared rows that
- *  pre-date the meta column. */
-function detectSpecialRender(artifact: Artifact): 'flashcards' | 'data_table' | 'markdown' {
+ *  pre-date the meta column. Audio overview is detected via
+ *  `artifact.kind === 'audio_overview'`, set by the route on insert. */
+function detectSpecialRender(
+  artifact: Artifact,
+): 'flashcards' | 'data_table' | 'audio_overview' | 'markdown' {
+  if (artifact.kind === 'audio_overview') return 'audio_overview';
   if (artifact.meta) {
     try {
       const meta = JSON.parse(artifact.meta) as { template?: string };
