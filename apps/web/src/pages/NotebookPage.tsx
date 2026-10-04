@@ -478,30 +478,17 @@ export default function NotebookPage() {
       {layout.mode === 'notebooklm' && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <SourcesStrip notebookId={notebookId} />
-          <div className="flex min-h-0 flex-1 overflow-hidden p-3 min-[640px]:p-6">
-            <div className="hidden min-h-0 flex-1 overflow-hidden min-[640px]:rounded-2xl min-[640px]:border min-[640px]:bg-surface min-[640px]:shadow-soft min-[640px]:flex"
-              style={{ borderColor: 'rgb(var(--nb-border))' }}>
-              <PanelErrorBoundary panel="Чат">
-                <ChatPanel
-                  notebookId={notebookId}
-                  onSaveArtifact={(question, answer, citations) => {
-                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                  }}
-                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-                />
-              </PanelErrorBoundary>
-            </div>
-            <div className="flex w-full flex-1 min-[640px]:hidden">
-              <PanelErrorBoundary panel="Чат">
-                <ChatPanel
-                  notebookId={notebookId}
-                  onSaveArtifact={(question, answer, citations) => {
-                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                  }}
-                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-                />
-              </PanelErrorBoundary>
-            </div>
+          {/* One ChatPanel, edge to edge — no card inside the column. */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <PanelErrorBoundary panel="Чат">
+              <ChatPanel
+                notebookId={notebookId}
+                onSaveArtifact={(question, answer, citations) => {
+                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                }}
+                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+              />
+            </PanelErrorBoundary>
           </div>
         </div>
       )}
@@ -541,10 +528,13 @@ export default function NotebookPage() {
         {/* CENTER */}
         <main
           ref={swipeRef}
-          className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 min-[640px]:gap-5 min-[640px]:p-6"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
           data-testid="notebook-center"
         >
-          <div className={mobileTab === 'sources' ? 'min-[640px]:hidden' : 'hidden'}>
+          {/* Mobile-only tabs. These keep the page padding because they
+              are self-contained cards; the chat does not, because it is
+              the column itself. */}
+          <div className={mobileTab === 'sources' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             <div className="card overflow-hidden">
               <SourcesPanel notebookId={notebookId} />
             </div>
@@ -553,7 +543,7 @@ export default function NotebookPage() {
           {/* Mobile-only overview tab. Desktop renders the summary inside
               ChatPanel as a pinned first message (see SummaryCard) so the
               central column stays a single scrolling conversation. */}
-          <div className={mobileTab === 'overview' ? 'min-[640px]:hidden' : 'hidden'}>
+          <div className={mobileTab === 'overview' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             {hasReadySources ? (
               <PanelErrorBoundary panel="Краткий обзор">
                 <SummaryPanel
@@ -566,35 +556,30 @@ export default function NotebookPage() {
             )}
           </div>
 
-          <div className={mobileTab === 'chat' ? 'flex min-h-0 flex-1 bg-canvas' : 'hidden min-[640px]:flex min-[640px]:min-h-0 min-[640px]:flex-1'}>
-            {/* Mobile: edge-to-edge, no card wrapper.
-                Desktop: card wrapper so the chat has a defined panel boundary. */}
-            <div className="hidden min-h-0 min-[640px]:flex min-[640px]:h-full min-[640px]:min-h-[460px] min-[640px]:w-full min-[640px]:flex-1 min-[640px]:overflow-hidden min-[640px]:rounded-2xl min-[640px]:border min-[640px]:bg-surface min-[640px]:shadow-soft"
-              style={{ borderColor: 'rgb(var(--nb-border))' }}>
-              <PanelErrorBoundary panel="Чат">
-                <ChatPanel
-                  notebookId={notebookId}
-                  onSaveArtifact={(question, answer, citations) => {
-                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                  }}
-                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-                />
-              </PanelErrorBoundary>
-            </div>
-            <div className="flex min-h-0 w-full flex-1 min-[640px]:hidden">
-              <PanelErrorBoundary panel="Чат">
-                <ChatPanel
-                  notebookId={notebookId}
-                  onSaveArtifact={(question, answer, citations) => {
-                    setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                  }}
-                  onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-                />
-              </PanelErrorBoundary>
-            </div>
+          {/* Chat — a single instance for every breakpoint, edge to edge.
+              It used to be two (a carded desktop copy plus an
+              edge-to-edge mobile copy), which mounted two live ChatPanels
+              and drew a frame inside the column: a window inside the
+              window. */}
+          <div
+            className={
+              mobileTab === 'chat'
+                ? 'flex min-h-0 flex-1'
+                : 'hidden min-[640px]:flex min-[640px]:min-h-0 min-[640px]:flex-1'
+            }
+          >
+            <PanelErrorBoundary panel="Чат">
+              <ChatPanel
+                notebookId={notebookId}
+                onSaveArtifact={(question, answer, citations) => {
+                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                }}
+                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+              />
+            </PanelErrorBoundary>
           </div>
 
-          <div className={mobileTab === 'artifacts' ? 'min-[640px]:hidden' : 'hidden'}>
+          <div className={mobileTab === 'artifacts' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             <ArtifactsPanel
               notebookId={notebookId}
               prefilled={prefilled}
