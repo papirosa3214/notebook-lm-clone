@@ -163,8 +163,12 @@ export default function NotebookPage() {
   const notebook = useQuery({
     queryKey: ['notebook', notebookId],
     queryFn: async () => {
-      const r = await fetch(`/api/notebooks/${notebookId}`).then((r) => r.json());
-      return r as { id: string; title: string; description?: string };
+      const r = await fetch(`/api/notebooks/${notebookId}`);
+      // Without this check a 404/500 body still parses as JSON and the
+      // query "succeeds", so the "Не удалось загрузить ноутбук" branch
+      // below could never be reached.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return (await r.json()) as { id: string; title: string; description?: string };
     },
   });
 
@@ -204,6 +208,23 @@ export default function NotebookPage() {
     [layout.notesWidth, layout.notesCollapsed, updateLayout],
   );
 
+  // Mobile swipe between tabs. MUST be declared before any early
+  // return: React requires a stable hook count across renders, and the
+  // loading / error branches below return before the rest of the body.
+  // (Declaring it lower caused "Rendered more hooks than during the
+  // previous render" and blanked the whole page.)
+  const TABS: MobileTab[] = ['sources', 'overview', 'chat', 'artifacts'];
+  const swipeRef = useSwipe<HTMLElement>({
+    onSwipeLeft: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i >= 0 && i < TABS.length - 1) setMobileTab(TABS[i + 1]!);
+    },
+    onSwipeRight: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i > 0) setMobileTab(TABS[i - 1]!);
+    },
+  });
+
   if (notebook.isLoading) {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-muted">
@@ -226,22 +247,6 @@ export default function NotebookPage() {
   const hasReadySources = sources.data?.sources.some((s) => s.status === 'ready') ?? false;
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
-
-  // Mobile swipe between tabs. The handler is always attached; on
-  // desktop ≥ 640 px the tabs are hidden so setMobileTab is a no-op
-  // visually but harmless. The hook is gated by a CSS class on the
-  // main element so swipe is only enabled at the mobile breakpoint.
-  const TABS: MobileTab[] = ['sources', 'overview', 'chat', 'artifacts'];
-  const swipeRef = useSwipe<HTMLElement>({
-    onSwipeLeft: () => {
-      const i = TABS.indexOf(mobileTab);
-      if (i >= 0 && i < TABS.length - 1) setMobileTab(TABS[i + 1]!);
-    },
-    onSwipeRight: () => {
-      const i = TABS.indexOf(mobileTab);
-      if (i > 0) setMobileTab(TABS[i - 1]!);
-    },
-  });
 
   return (
     <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
