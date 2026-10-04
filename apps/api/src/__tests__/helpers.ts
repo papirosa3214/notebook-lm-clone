@@ -25,6 +25,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { config } from '../config.js';
 
 const EMBEDDING_DIM = 1024;
 
@@ -74,6 +75,23 @@ export function withApiTestEnv(): ApiTestEnv {
   process.env.EMBEDDING_MODEL = 'bge-m3-embed';
   process.env.EMBEDDING_DIM = String(EMBEDDING_DIM);
   process.env.NODE_ENV = 'test';
+
+  // The process.env writes above only take effect if config.ts has not
+  // been parsed yet. A test file that does `import { config } from
+  // '../config.js'` at the top level can be evaluated *before* this
+  // function runs (ESM hoists imports), which would leave config
+  // pointing at the real dev database. We mutate the already-parsed
+  // config object synchronously so isolation never depends on import
+  // order. `config` is imported statically at the top of this file for
+  // exactly this reason — a dynamic import here would race the first
+  // `getDb()` call.
+  const mutableConfig = config as unknown as Record<string, unknown>;
+  mutableConfig.DB_PATH = dbPath;
+  mutableConfig.OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+  mutableConfig.EMBEDDING_BASE_URL = 'http://127.0.0.1:11434';
+  mutableConfig.EMBEDDING_MODEL = 'bge-m3-embed';
+  mutableConfig.EMBEDDING_DIM = EMBEDDING_DIM;
+  mutableConfig.NODE_ENV = 'test';
 
   const originalFetch = globalThis.fetch;
   let dbModule: typeof import('../db/index.js') | null = null;
