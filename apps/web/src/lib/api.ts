@@ -12,6 +12,7 @@ import type {
 } from './types';
 import type {
   AiEditDelta,
+  DeepResearchDelta,
   AudioOverviewDelta,
   AudioOverviewLine,
   AudioOverviewMeta,
@@ -348,6 +349,20 @@ export const api = {
     },
     onDelta: (delta: AiEditDelta) => void,
   ): AiEditStreamHandle => openAiEditStream(artifactId, body, onDelta),
+
+  // Deep Research — autonomous plan → search → ingest → synthesise run.
+  deepResearchStream: (
+    notebookId: string,
+    body: {
+      question: string;
+      maxQueries?: number;
+      maxSources?: number;
+      resultsPerQuery?: number;
+      provider?: ProviderId;
+      model?: string;
+    },
+    onDelta: (delta: DeepResearchDelta) => void,
+  ): DeepResearchStreamHandle => openDeepResearchStream(notebookId, body, onDelta),
 };
 
 /** Public, no-auth snapshot fetch for the /shared/:token viewer page. */
@@ -478,6 +493,7 @@ function openAiEditStream(
       const decoder = new TextDecoder();
       let buf = '';
       let output: string | null = null;
+      let sseError: string | null = null;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -491,15 +507,94 @@ function openAiEditStream(
           try {
             const payload = JSON.parse(dataLine.slice(5).trim()) as AiEditDelta;
             if (payload.type === 'done') output = payload.output;
+            else if (payload.type === 'error') sseError = payload.message;
             onDelta(payload);
           } catch {
             // ignore malformed
           }
         }
-        if (output !== null) break;
+        if (output !== null || sseError !== null) break;
       }
+      if (sseError !== null) throw new Error(sseError);
       if (output === null) throw new Error('stream closed without done event');
       return { output };
     })();
     return { promise, abort: () => controller.abort() };
   }
+
+// === Deep Research ========================================================
+// Same SSE contract as the other streaming helpers: the caller gets an
+// abort handle and the promise resolves with the final artifact id once
+// the `done` event arrives.
+
+export interface DeepResearchStreamHandle {
+  promise: Promise<{ artifactId: string; sourceCount: number; citationCount: number }>;
+  abort: () => void;
+}
+
+function openDeepResearchStream(
+  notebookId: string,
+  body: {
+    question: string;
+    maxQueries?: number;
+    maxSources?: number;
+    resultsPerQuery?: number;
+    provider?: ProviderId;
+    model?: string;
+  },
+  onDelta: (delta: DeepResearchDelta) => void,
+): DeepResearchStreamHandle {
+  const controller = new AbortController();
+  const promise = (async () => {
+    const res = await fetch(`/api/notebooks/${notebookId}/deep-research`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new ApiError(res.status, text);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let final: { artifactId: string; sourceCount: number; citationCount: number } | null = null;
+    // The server can end a run with an explicit `error` delta. Remember
+    // it so we reject with the real reason instead of the generic
+    // "stream closed without done event".
+    let sseError: string | null = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n\n')) !== -1) {
+        const block = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!dataLine) continue;
+        try {
+          const payload = JSON.parse(dataLine.slice(5).trim()) as DeepResearchDelta;
+          if (payload.type === 'done') {
+            final = {
+              artifactId: payload.artifactId,
+              sourceCount: payload.sourceCount,
+              citationCount: payload.citationCount,
+            };
+          } else if (payload.type === 'error') {
+            sseError = payload.message;
+          }
+          onDelta(payload);
+        } catch {
+          // ignore malformed
+        }
+      }
+      if (final !== null || sseError !== null) break;
+    }
+    if (sseError !== null) throw new Error(sseError);
+    if (final === null) throw new Error('stream closed without done event');
+    return final;
+  })();
+  return { promise, abort: () => controller.abort() };
+}

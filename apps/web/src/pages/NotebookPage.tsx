@@ -14,6 +14,7 @@ import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { AudioOverviewDialog } from '../components/AudioOverviewDialog';
 import { StudioReportDialog } from '../components/StudioReportDialog';
+import { DeepResearchDialog } from '../components/DeepResearchDialog';
 import { ShareDialog } from '../components/ShareDialog';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
@@ -138,6 +139,13 @@ export default function NotebookPage() {
       run: () => toggle(),
     },
     {
+      id: 'deep-research',
+      label: '🔎 Deep Research',
+      hint: 'агент найдёт источники и напишет отчёт',
+      keywords: ['research', 'deep', 'agent', 'исследование', 'поиск'],
+      run: () => setShowDeepResearchDialog(true),
+    },
+    {
       id: 'collapse-sources',
       label: '📚 Скрыть источники',
       hint: 'левая панель',
@@ -173,6 +181,7 @@ export default function NotebookPage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showStudioDialog, setShowStudioDialog] = useState(false);
+  const [showDeepResearchDialog, setShowDeepResearchDialog] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
 
   // Live drag — drives both the visible width (via setLayout) and the
@@ -282,6 +291,16 @@ export default function NotebookPage() {
           >
             <SparkleIcon size={12} className="text-accent" />
             <span>Studio</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeepResearchDialog(true)}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
+            title="Deep Research: агент сам найдёт источники в вебе и напишет отчёт"
+            data-testid="open-deep-research"
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Deep Research</span>
           </button>
           <button
             type="button"
@@ -591,6 +610,13 @@ export default function NotebookPage() {
         <StudioReportDialog
           notebookId={notebookId}
           onClose={() => setShowStudioDialog(false)}
+        />
+      )}
+      {showDeepResearchDialog && (
+        <DeepResearchDialog
+          notebookId={notebookId}
+          onClose={() => setShowDeepResearchDialog(false)}
+          onCreated={() => setMobileTab('artifacts')}
         />
       )}
       {showShareDialog && (
