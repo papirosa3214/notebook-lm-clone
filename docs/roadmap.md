@@ -376,11 +376,29 @@ contentMd (markdown для reports, JSON для flashcards/data_table).
   - `public/pwa-files.test.ts` (11) — manifest shape, sw shape,
     index.html meta — без необходимости поднимать браузер
 
-### E2. Swaip между панелями + mobile polish
-- Hammer.js или нативный pointer events для свайпа между
-  панелями на мобильных.
-- Чистка CSS на основе уже начатого `min-[640px]` брейкпойнта
-  (A1.6 Этапа 9) — местами мобильный layout ещё недополирован.
+### E2. Swipe между панелями + mobile polish — **сделано** (текущая ветка, 2 коммита)
+- `apps/web/src/lib/useSwipe.ts` (новый):
+  - horizontal swipe handler на нативных Pointer Events
+  - threshold 50 px по горизонтали, vertical tolerance 25 px
+  - доминантно-вертикальный жест отменяет (пользователь
+    скроллит, а не свайпает)
+  - callback ref, listeners attach синхронно при mount,
+    detach при unmount / ref(null)
+  - per-attach state с getter'ами — handlers/options
+    подхватываются свежими без re-attach
+  - ~80 строк, no extra deps (не тянем react-swipeable
+    / @use-gesture ради одного gesture)
+- `apps/web/src/pages/NotebookPage.tsx`:
+  - TABS массив: sources/overview/chat/artifacts
+  - `useSwipe` привязан к `<main>` (data-testid="notebook-center")
+  - onSwipeLeft → next tab, onSwipeRight → prev tab
+  - на desktop tabs скрыты через `min-[640px]:hidden`, так что
+    setMobileTab no-op визуально но безвреден
+  - page indicator: 4 dots справа от табов, активный
+    длиннее (w-4 vs w-1.5) и accent-цветом
+  - aria-label "Вкладка N из 4" для screen readers
+- Тесты: 7 на useSwipe (left/right/subthreshold/custom
+  threshold/vertical cancel/non-primary/unmount-detach)
 
 **DoD:** «Add to Home Screen» на iOS/Android ставит иконку, открывает
 standalone, корректно обрабатывает safe-area-inset. Service

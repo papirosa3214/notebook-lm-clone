@@ -98,6 +98,11 @@ pnpm --filter @notebook/web dev      # Web на :5173
   `format-detection=telephone=no`. Viewport: `viewport-fit=cover`.
 - CSS-утилиты: `.p-safe` / `.pt-safe` для safe-area-inset,
   `.touch-target` (44×44), `.no-zoom` (touch-action: manipulation).
+- Mobile gestures: `useSwipe` хук (Pointer Events, threshold 50px
+  по горизонтали, vertical-drift отменяет). В `NotebookPage`
+  листает 4 мобильных таба (Источники / Обзор / Чат / Заметки)
+  свайпом ←/→. Page indicator (4 dots) справа от табов
+  показывает активный, с aria-label "Вкладка N из 4".
 
 Все API-запросы всегда идут на сеть, поэтому чат и поиск
 деградируют «честно» (UI покажет ошибку при отсутствии связи),
