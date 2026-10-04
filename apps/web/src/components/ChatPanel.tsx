@@ -225,7 +225,13 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas min-[640px]:bg-surface">
+    // `flex-1 min-w-0 w-full` matters: every parent that hosts this panel
+    // is a flex ROW (the desktop card, the NotebookLM-mode wrapper, the
+    // mobile edge-to-edge wrapper). Without an explicit grow the panel is
+    // sized to its content, so on a wide window it rendered ~890 px wide
+    // inside a ~1210 px card and left a blank column on the right — which
+    // reads as a phone-width chat that refuses to expand on desktop.
+    <div className="flex h-full w-full min-h-0 min-w-0 flex-1 flex-col bg-canvas min-[640px]:bg-surface">
       {/* ---- Provider/model strip ---- */}
       <div className="flex items-center justify-between gap-2 border-b px-4 py-2"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
