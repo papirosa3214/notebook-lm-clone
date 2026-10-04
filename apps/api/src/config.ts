@@ -59,6 +59,15 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+
+  // Deep Research agent — plan queries, search the web, ingest the
+  // hits as real sources, synthesise a cited report. Needs outgoing
+  // network to DuckDuckGo and the target sites; turn off in an
+  // air-gapped deployment.
+  DEEP_RESEARCH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 const parsed = schema.safeParse(process.env);

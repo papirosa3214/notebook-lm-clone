@@ -18,6 +18,7 @@ import { shareRoutes } from './routes/share.js';
 import { exportRoutes } from './routes/export.js';
 import { suggestionRoutes } from './routes/suggestions.js';
 import { aiEditRoutes } from './routes/aiEdit.js';
+import { deepResearchRoutes } from './routes/deepResearch.js';
 
 /**
  * Construct the Fastify app without binding to a port. The production
@@ -59,6 +60,7 @@ export async function buildApp(
   await app.register(exportRoutes);
   await app.register(suggestionRoutes);
   await app.register(aiEditRoutes);
+  await app.register(deepResearchRoutes);
 
   return app;
 }

@@ -516,3 +516,88 @@ export const AiEditDeltaSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type AiEditDelta = z.infer<typeof AiEditDeltaSchema>;
+
+// === Deep Research =========================================================
+// Autonomous multi-step research: plan queries → web search → fetch &
+// ingest the best hits as sources → synthesise a cited report. Streamed
+// over SSE so the UI can show each phase as it happens.
+
+export const DeepResearchRequestSchema = z.object({
+  /** The research question. */
+  question: z.string().min(1),
+  /** How many search queries the planner should produce (1-6). */
+  maxQueries: z.number().int().min(1).max(6).default(3),
+  /** How many web results to actually ingest as sources (1-10). */
+  maxSources: z.number().int().min(1).max(10).default(5),
+  /** Search results to look at per query before deduping. */
+  resultsPerQuery: z.number().int().min(1).max(10).default(5),
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+});
+export type DeepResearchRequest = z.infer<typeof DeepResearchRequestSchema>;
+
+export const DeepResearchPhaseSchema = z.enum([
+  'planning',
+  'searching',
+  'fetching',
+  'synthesizing',
+  'done',
+  'failed',
+]);
+export type DeepResearchPhase = z.infer<typeof DeepResearchPhaseSchema>;
+
+export const DeepResearchDeltaSchema = z.discriminatedUnion('type', [
+  /** Coarse progress. ratio is 0..1 for the whole run. */
+  z.object({
+    type: z.literal('phase'),
+    phase: DeepResearchPhaseSchema,
+    message: z.string().optional(),
+    ratio: z.number().min(0).max(1).optional(),
+  }),
+  /** Planner output: the queries the agent will run. */
+  z.object({ type: z.literal('queries'), queries: z.array(z.string().min(1)) }),
+  /** A web hit the agent considered. `ingested` is set once we've
+   *  written it into the vector store (or skipped it). */
+  z.object({
+    type: z.literal('hit'),
+    url: z.string(),
+    title: z.string(),
+    ingested: z.boolean(),
+    reason: z.string().optional(),
+  }),
+  /** Synthesis tokens (the report body). */
+  z.object({ type: z.literal('token'), text: z.string() }),
+  /** Terminal success. */
+  z.object({
+    type: z.literal('done'),
+    artifactId: z.string(),
+    sourceCount: z.number().int().min(0),
+    citationCount: z.number().int().min(0),
+  }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type DeepResearchDelta = z.infer<typeof DeepResearchDeltaSchema>;
+
+/** Meta persisted on a Deep Research artifact (`kind='report'`,
+ *  `meta.template='deep_research'`). Distinct from StudioReportMeta
+ *  because it also records the planner output and how many sources
+ *  the run actually ingested. */
+export const DeepResearchMetaSchema = z.object({
+  template: z.literal('deep_research'),
+  status: z.enum(['running', 'ready', 'failed']),
+  question: z.string(),
+  /** Queries the planner produced. */
+  queries: z.array(z.string()),
+  /** Sources this run ingested (ids + titles) so the UI can show
+   *  what was added without re-querying. */
+  ingestedSources: z.array(
+    z.object({ id: z.string(), title: z.string(), url: z.string() }),
+  ),
+  sourceCount: z.number().int().min(0),
+  citationCount: z.number().int().min(0),
+  model: z.string().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type DeepResearchMeta = z.infer<typeof DeepResearchMetaSchema>;
