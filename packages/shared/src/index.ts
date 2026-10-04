@@ -483,3 +483,36 @@ export const IngestProgressDeltaSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type IngestProgressDelta = z.infer<typeof IngestProgressDeltaSchema>;
+
+// === Inline AI note assist ================================================
+// Streaming edit endpoint. The LLM is asked to rewrite / expand / shorten
+// a chunk of text (either the user's selection or the whole document).
+// The streamed tokens replace the selection in the editor on completion.
+
+export const AiEditInstructionSchema = z.enum(['rewrite', 'expand', 'shorten']);
+export type AiEditInstruction = z.infer<typeof AiEditInstructionSchema>;
+
+export const AiEditRequestSchema = z.object({
+  /** What the model should do with the input. */
+  instruction: AiEditInstructionSchema,
+  /** The selected range. When empty the model operates on `fullText`. */
+  selection: z.string().default(''),
+  /** Full document text — used as context for "rewrite" when the
+   *  selection alone would be ambiguous. */
+  fullText: z.string().min(1),
+  /** Optional override for the LLM provider / model. */
+  provider: ProviderIdSchema.optional(),
+  model: z.string().optional(),
+});
+export type AiEditRequest = z.infer<typeof AiEditRequestSchema>;
+
+/** SSE delta for the AI edit endpoint. Mirrors the chat pattern. */
+export const AiEditDeltaSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('token'), text: z.string() }),
+  /** Final event when the stream ends. `output` is the full edited
+   *  text — clients that didn't want to reassemble tokens can
+   *  take this verbatim. */
+  z.object({ type: z.literal('done'), output: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type AiEditDelta = z.infer<typeof AiEditDeltaSchema>;
