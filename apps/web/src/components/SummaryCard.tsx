@@ -1,18 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { CitationChunk } from '../lib/types';
 import { Dot } from './Dot';
 import { RefreshIcon } from './icons/NotebookLogo';
-import { streamSummary } from '../lib/stream';
+import {
+  ensureSummaryStarted,
+  getSummaryState,
+  refreshSummary,
+  subscribeSummary,
+} from '../lib/summaryStore';
 
 /**
- * Renders a notebook summary as the first ("pinned") message inside the
- * chat panel. The summary is loaded from localStorage on mount; the user
- * can click "Обновить" to regenerate it (streams a fresh summary and
- * saves the result).
+ * Renders the notebook summary as the first ("pinned") message inside
+ * the chat panel.
  *
- * Inline `[N]` citations inside the markdown are clickable and fire
- * `onOpenCitation` so the parent can scroll to the source chunk in the
- * SourcesPanel — same behaviour as chat bubbles.
+ * The stream itself lives in `summaryStore` (see the comment there for
+ * why), so all this component does is subscribe and render. It
+ * auto-generates on mount as soon as at least one source is ready —
+ * previously nothing appeared until the user found the ↻ button, which
+ * was itself hidden while the card had no content.
  */
 interface Props {
   notebookId: string;
@@ -20,83 +25,25 @@ interface Props {
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
 }
 
-interface Persisted {
-  content: string;
-  citations: CitationChunk[];
-  savedAt: string;
-}
-
-const STORAGE_KEY = (id: string) => `nb.summary.${id}`;
-
-function loadPersisted(id: string): Persisted | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY(id));
-    if (!raw) return null;
-    return JSON.parse(raw) as Persisted;
-  } catch {
-    return null;
-  }
-}
-
-function savePersisted(id: string, data: Persisted) {
-  try {
-    localStorage.setItem(STORAGE_KEY(id), JSON.stringify(data));
-  } catch {
-    /* quota / private mode — ignore */
-  }
-}
-
 export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
-  const initial = loadPersisted(notebookId);
-  const [content, setContent] = useState<string>(initial?.content ?? '');
-  const [citations, setCitations] = useState<CitationChunk[]>(initial?.citations ?? []);
-  const [savedAt, setSavedAt] = useState<string | null>(initial?.savedAt ?? null);
-  const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const state = useSyncExternalStore(
+    (fn) => subscribeSummary(notebookId, fn),
+    () => getSummaryState(notebookId),
+    () => getSummaryState(notebookId),
+  );
 
-  function refresh() {
-    setError(null);
-    setStreaming(true);
-    let acc = '';
-    let accCitations: CitationChunk[] = [];
-    streamSummary(
-      { notebookId },
-      {
-        onCitations: (chunks) => {
-          accCitations = chunks;
-          setCitations(chunks);
-        },
-        onToken: (t) => {
-          acc += t;
-          setContent(acc);
-        },
-        onDone: () => {
-          setStreaming(false);
-          if (acc.trim()) {
-            const data: Persisted = {
-              content: acc,
-              citations: accCitations,
-              savedAt: new Date().toISOString(),
-            };
-            savePersisted(notebookId, data);
-            setSavedAt(data.savedAt);
-          }
-        },
-        onAbort: () => setStreaming(false),
-        onError: (msg) => {
-          setStreaming(false);
-          setError(msg);
-        },
-      },
-    );
-  }
+  // Generate the overview as soon as there is something to summarise.
+  // `ensureSummaryStarted` is idempotent, so StrictMode's double mount
+  // joins the in-flight stream instead of starting a second one.
+  useEffect(() => {
+    if (readyCount > 0) ensureSummaryStarted(notebookId);
+  }, [notebookId, readyCount]);
 
-  // Auto-refresh intentionally NOT triggered here — under React
-  // Strict-Mode the probe mount races with the actual mount and ends
-  // up double-streaming. The user clicks the ↻ button to generate.
+  // No sources → nothing to summarise. With sources we render the card
+  // immediately, even while empty, so the user sees it working.
+  if (readyCount === 0) return null;
 
-  // Hide entirely until we have something to show.
-  if (!streaming && content.length === 0 && !error) return null;
+  const { content, citations, savedAt, streaming, error } = state;
 
   const dateLabel = savedAt
     ? new Date(savedAt).toLocaleDateString('ru-RU', {
@@ -110,42 +57,46 @@ export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
     <div
       className="rounded-2xl border bg-surface px-5 py-5 shadow-soft animate-fade-in"
       style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}
+      data-testid="summary-card"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-[22px] font-semibold leading-tight tracking-tight md:text-[26px]">
             Краткое содержание
           </h3>
-          {readyCount > 0 && (
-            <p className="mt-1 text-xs text-muted">
-              {readyCount} источник{ruPluralInline(readyCount)}
-              {dateLabel ? ` · ${dateLabel}` : ''}
-            </p>
-          )}
+          <p className="mt-1 text-xs text-muted">
+            {readyCount} источник{ruPluralInline(readyCount)}
+            {dateLabel ? ` · ${dateLabel}` : ''}
+          </p>
         </div>
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => refreshSummary(notebookId)}
           disabled={streaming}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-muted transition-all hover:bg-surface-tint disabled:opacity-40"
           style={{ borderColor: 'rgb(var(--nb-border))' }}
           title="Обновить обзор"
+          data-testid="summary-refresh"
         >
           <RefreshIcon size={13} className={streaming ? 'animate-spin' : ''} />
         </button>
       </div>
 
-      {error && <p className="mb-3 text-xs text-red-600">Ошибка: {error}</p>}
+      {error && (
+        <p className="mb-3 text-xs text-red-600" data-testid="summary-error">
+          Ошибка: {error}
+        </p>
+      )}
 
       <div className="prose-summary text-[15px] leading-relaxed text-ink">
-        {streaming && content.length === 0 ? (
+        {content.length === 0 ? (
           <span className="inline-flex items-center gap-2 text-sm text-muted">
             <span className="inline-flex items-center gap-1.5">
               <Dot delay={0} />
               <Dot delay={150} />
               <Dot delay={300} />
             </span>
-            Загружаю модель…
+            Составляю обзор по источникам…
           </span>
         ) : (
           renderMarkdownWithCitations(content, citations, onOpenCitation)
