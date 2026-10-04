@@ -64,12 +64,11 @@ export function SummaryCard({
   const markdown = `# Краткое содержание\n\n${content.trim()}\n`;
 
   return (
-    <div
-      className="rounded-2xl border bg-surface px-5 py-5 shadow-soft animate-fade-in"
-      style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}
-      data-testid="summary-card"
-    >
-      <div className="mb-3 flex items-start justify-between gap-3">
+    // Flat: no rounded box, no border, no shadow, no tinted background.
+    // The chat column is already its own visual surface; boxing the
+    // overview inside it just makes the column feel nested.
+    <div className="px-1 py-4 animate-fade-in" data-testid="summary-card">
+      <div className="mb-2 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-[22px] font-semibold leading-tight tracking-tight md:text-[26px]">
             Краткое содержание
@@ -83,8 +82,7 @@ export function SummaryCard({
           type="button"
           onClick={() => refreshSummary(notebookId)}
           disabled={streaming}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-muted transition-all hover:bg-surface-tint disabled:opacity-40"
-          style={{ borderColor: 'rgb(var(--nb-border))' }}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-all hover:bg-surface-tint disabled:opacity-40"
           title="Обновить обзор"
           data-testid="summary-refresh"
         >
@@ -114,7 +112,7 @@ export function SummaryCard({
       </div>
 
       {content.length > 0 && (
-        <div className="mt-4 border-t pt-3" style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}>
+        <div className="mt-3">
           <MessageActions
             markdown={markdown}
             filename={`краткое-содержание-${notebookId}`}

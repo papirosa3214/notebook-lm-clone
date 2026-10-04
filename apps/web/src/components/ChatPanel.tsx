@@ -257,8 +257,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     // reads as a phone-width chat that refuses to expand on desktop.
     <div className="flex h-full w-full min-h-0 min-w-0 flex-1 flex-col bg-canvas min-[640px]:bg-surface">
       {/* ---- Provider/model strip ---- */}
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-2"
-        style={{ borderColor: 'rgb(var(--nb-border))' }}>
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex items-center gap-1.5">
           <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-subtle">
             <SparkleIcon size={11} className="text-accent" />
@@ -433,8 +432,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
           e.preventDefault();
           send();
         }}
-        className="border-t p-3 min-[640px]:p-4"
-        style={{ borderColor: 'rgb(var(--nb-border))' }}
+        className="px-3 pt-3 pb-3 min-[640px]:px-4 min-[640px]:pt-4"
       >
         <div
           className="flex items-end gap-2 rounded-2xl border bg-surface px-3 py-2 transition-all focus-within:border-accent"
