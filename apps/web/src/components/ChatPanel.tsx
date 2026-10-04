@@ -514,7 +514,10 @@ function MessageBubble({
   if (message.role === 'user') {
     return (
       <div className="flex justify-end animate-fade-up">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-[15px] text-white shadow-soft">
+        {/* Flat: subtle background tint to keep "what the human said"
+            visually separable from the model's reply, without a frame
+            or a coloured pill. */}
+        <div className="max-w-[85%] rounded-md bg-surface-tint px-3 py-2 text-[15px]">
           {message.content}
         </div>
       </div>
@@ -532,8 +535,10 @@ function MessageBubble({
         <SparkleIcon size={14} className="text-white" />
       </div>
       <div className="min-w-0 max-w-[88%] flex-1 space-y-2">
-        <div className="prose-chat rounded-2xl rounded-tl-md border bg-surface px-4 py-3"
-          style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}>
+        {/* Flat: the column already delimits the reply from the user's
+            question above. A frame here would just nest another box
+            inside the chat window. */}
+        <div className="prose-chat text-[15px] leading-relaxed">
           {message.pending && !message.content ? (
             <span className="inline-flex items-center gap-2 text-sm text-muted">
               <span className="inline-flex items-center gap-1.5">
