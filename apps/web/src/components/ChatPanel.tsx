@@ -382,7 +382,11 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             onAsk={setInput}
           />
         )}
-        {messages.length === 0 && (
+        {/* Only the truly empty notebook gets this prompt — once there is
+            at least one ready source the summary card or the input row
+            are the obvious next move and the centered "ask a question"
+            block just competes with them for the user's attention. */}
+        {messages.length === 0 && readyCount === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-md text-center">
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl"
