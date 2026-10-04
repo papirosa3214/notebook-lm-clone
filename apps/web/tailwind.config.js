@@ -62,7 +62,6 @@ export default {
         'fade-up': 'fade-up 240ms ease-out',
         shimmer: 'shimmer 1.6s linear infinite',
         sparkle: 'sparkle 2.4s ease-in-out infinite',
-        'pulse-once': 'pulse-once 2400ms ease-out',
       },
     },
   },

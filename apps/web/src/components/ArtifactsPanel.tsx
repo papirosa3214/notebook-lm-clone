@@ -176,7 +176,7 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
                   key={a.id}
                   className={
                     'source-pill group cursor-pointer transition-all ' +
-                    (a.id === pulseId ? 'ring-2 ring-accent animate-pulse-once' : '')
+                    (a.id === pulseId ? 'ring-2 ring-accent' : '')
                   }
                   onClick={() => setSelectedId(a.id)}
                   data-testid={`artifact-list-item-${a.id}`}
