@@ -61,17 +61,21 @@ interface LayoutState {
 
 const DEFAULT_LAYOUT: LayoutState = {
   sourcesWidth: 300,
-  notesWidth: 320,
+  notesWidth: 340,
   sourcesCollapsed: false,
-  // Notes (artifacts) are hidden by default — the summary lives in the
-  // chat panel as a pinned first message, and artifact creation flows
-  // through the chat's "сохранить в заметки" button. Users who want
-  // a dedicated notes panel can open it from the right rail.
-  notesCollapsed: true,
+  // Notes (artifacts) start open. They used to default to collapsed —
+  // the panel can still be closed from the right rail, but hiding
+  // artifacts by default made the page look broken and left Studio
+  // reports / Audio Overviews / Deep Research results with nowhere
+  // visible to land.
+  notesCollapsed: false,
   mode: 'threeColumn',
 };
 
-const LAYOUT_KEY = 'nb.layout';
+// v2: the notes panel now defaults to open. Bumping the key means an
+// existing installation picks up the new default once instead of
+// keeping a stale `notesCollapsed: true` from the old layout blob.
+const LAYOUT_KEY = 'nb.layout.v2';
 const MIN_PANEL = 200;
 const MAX_PANEL = 600;
 

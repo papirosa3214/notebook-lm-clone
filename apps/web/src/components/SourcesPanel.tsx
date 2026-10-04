@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type {
   IngestProgressDelta,
@@ -16,9 +16,9 @@ import {
   PlusIcon,
   SearchIcon,
   RefreshIcon,
+  SendIcon,
   CloseIcon,
   TrashIcon,
-  SparkleIcon,
   ChevronDownIcon,
 } from './icons/NotebookLogo';
 
@@ -70,10 +70,12 @@ export function SourcesPanel({ notebookId }: Props) {
 
   const [showAddUrl, setShowAddUrl] = useState(false);
   const [showAddYt, setShowAddYt] = useState(false);
-  const [showAddYtAsr, setShowAddYtAsr] = useState(false);
   const [showAddFile, setShowAddFile] = useState(false);
   const [showAddSearch, setShowAddSearch] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
+  /** Text typed into the add-source bar, handed to whichever dialog the
+   *  bar routed to so the user doesn't retype it. */
+  const [pendingValue, setPendingValue] = useState('');
 
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
@@ -127,18 +129,25 @@ export function SourcesPanel({ notebookId }: Props) {
         </div>
       </div>
 
-      {/* Add source — 4 circular buttons in a row, like NotebookLM */}
-      <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
-        <AddCircle label="URL" onClick={() => setShowAddUrl(true)} kind="url" />
-        <AddCircle label="YouTube" onClick={() => setShowAddYt(true)} kind="youtube" />
-        <AddCircle label="YouTube → ASR" onClick={() => setShowAddYtAsr(true)} kind="youtube" />
-        <AddCircle label="Файл" onClick={() => setShowAddFile(true)} kind="file" />
-        <AddCircle
-          label="Discover"
-          onClick={() => setShowAddSearch(true)}
-          kind="discover"
-        />
-      </div>
+      {/* Add source — a single entry point. Paste a URL or type a query;
+          the bar routes to the right dialog, which is where the details
+          (title, ASR toggle, which hits to ingest) get chosen. */}
+      <AddSourceBar
+        onSubmit={(value) => {
+          const kind = classifySourceInput(value);
+          if (kind === 'youtube') {
+            setPendingValue(value);
+            setShowAddYt(true);
+          } else if (kind === 'url') {
+            setPendingValue(value);
+            setShowAddUrl(true);
+          } else {
+            setPendingValue(value);
+            setShowAddSearch(true);
+          }
+        }}
+        onPickFile={() => setShowAddFile(true)}
+      />
 
       {/* Sources list */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -174,14 +183,36 @@ export function SourcesPanel({ notebookId }: Props) {
         </ul>
       </div>
 
-      {showAddUrl && <AddUrlDialog notebookId={notebookId} onClose={() => setShowAddUrl(false)} />}
-      {showAddYt && <AddYoutubeDialog notebookId={notebookId} onClose={() => setShowAddYt(false)} />}
-      {showAddYtAsr && (
-        <AddYoutubeAsrDialog notebookId={notebookId} onClose={() => setShowAddYtAsr(false)} />
+      {showAddUrl && (
+        <AddUrlDialog
+          notebookId={notebookId}
+          initialValue={pendingValue}
+          onClose={() => {
+            setShowAddUrl(false);
+            setPendingValue('');
+          }}
+        />
+      )}
+      {showAddYt && (
+        <AddYoutubeDialog
+          notebookId={notebookId}
+          initialValue={pendingValue}
+          onClose={() => {
+            setShowAddYt(false);
+            setPendingValue('');
+          }}
+        />
       )}
       {showAddFile && <AddFileDialog notebookId={notebookId} onClose={() => setShowAddFile(false)} />}
       {showAddSearch && (
-        <DiscoverDialog notebookId={notebookId} onClose={() => setShowAddSearch(false)} />
+        <DiscoverDialog
+          notebookId={notebookId}
+          initialQuery={pendingValue}
+          onClose={() => {
+            setShowAddSearch(false);
+            setPendingValue('');
+          }}
+        />
       )}
       {pendingDelete && (
         <ConfirmDialog
@@ -206,41 +237,115 @@ export function SourcesPanel({ notebookId }: Props) {
   );
 }
 
-function AddCircle({
-  label,
-  onClick,
-  kind,
+/** What the single add-source input looks like it contains. */
+export type SourceInputKind = 'youtube' | 'url' | 'query';
+
+/**
+ * Route one piece of user input to the right add-source flow.
+ *
+ * - a YouTube URL, youtu.be link, or bare 11-char video id → YouTube
+ * - any other host that looks like a domain               → page URL
+ * - everything else                                       → web search
+ *
+ * Pure function so the routing rules are unit-tested rather than buried
+ * in an onClick handler.
+ */
+export function classifySourceInput(raw: string): SourceInputKind {
+  const v = raw.trim();
+  if (!v) return 'query';
+  // Bare YouTube video id.
+  if (/^[A-Za-z0-9_-]{11}$/.test(v)) return 'youtube';
+
+  let host: string;
+  const hasScheme = /^https?:\/\//i.test(v);
+  try {
+    const u = new URL(hasScheme ? v : `https://${v}`);
+    host = u.hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return 'query';
+  }
+  if (
+    host === 'youtu.be' ||
+    host === 'youtube.com' ||
+    host === 'm.youtube.com' ||
+    host === 'music.youtube.com'
+  ) {
+    return 'youtube';
+  }
+  // An explicit scheme is a deliberate paste of an address, even for
+  // hosts without a dot (http://localhost:3000, intranet names).
+  if (hasScheme) return 'url';
+  if (host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return 'url';
+  // A single word ("протоколы") parses as a hostname but has no dot —
+  // that is a search, not a URL.
+  if (!host.includes('.')) return 'query';
+  return 'url';
+}
+
+/**
+ * The Sources panel's only add-source affordance: one field where the
+ * user pastes a URL or types a question. The dialog that opens next is
+ * where the details get chosen (title, Whisper ASR, which hits to
+ * ingest). Files can't be typed, so they keep their own button.
+ */
+function AddSourceBar({
+  onSubmit,
+  onPickFile,
 }: {
-  label: string;
-  onClick: () => void;
-  kind: SourceKind | 'discover';
+  onSubmit: (value: string) => void;
+  onPickFile: () => void;
 }) {
-  const isDiscover = kind === 'discover';
+  const [value, setValue] = useState('');
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex items-center gap-1.5 rounded-full border bg-surface py-1.5 pl-1.5 pr-3.5 text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-soft"
-      style={{
-        borderColor: 'rgb(var(--nb-border))',
-        color: 'rgb(var(--nb-ink))',
+    <form
+      className="px-4 pb-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const v = value.trim();
+        if (!v) return;
+        onSubmit(v);
+        setValue('');
       }}
-      title={`Добавить ${label.toLowerCase()}`}
     >
-      <span
-        className="flex h-6 w-6 items-center justify-center rounded-full text-white"
-        style={{
-          backgroundColor: isDiscover ? 'rgb(var(--nb-ai-glow))' : 'rgb(var(--nb-accent))',
-        }}
+      <div
+        className="flex items-center gap-1.5 rounded-2xl border bg-surface px-2.5 py-1"
+        style={{ borderColor: 'rgb(var(--nb-border))' }}
       >
-        {isDiscover ? (
-          <SparkleIcon size={11} />
-        ) : (
-          <SourceIcon kind={kind as SourceKind} size={12} />
-        )}
-      </span>
-      <span className="leading-none">{label}</span>
-    </button>
+        <SearchIcon size={14} className="shrink-0 text-muted" />
+        <input
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-ink outline-none placeholder:text-muted"
+          placeholder="Вставьте ссылку или введите запрос…"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          data-testid="add-source-input"
+          aria-label="Добавить источник: ссылка или поисковый запрос"
+        />
+        <button
+          type="button"
+          onClick={onPickFile}
+          className="shrink-0 rounded-full p-1.5 text-muted transition-colors hover:bg-surface-tint hover:text-ink"
+          title="Загрузить файл"
+          aria-label="Загрузить файл"
+          data-testid="add-source-file"
+        >
+          <PlusIcon size={14} />
+        </button>
+        <button
+          type="submit"
+          disabled={!value.trim()}
+          className="shrink-0 rounded-full p-1.5 text-accent transition-colors hover:bg-surface-tint disabled:opacity-40"
+          title="Добавить"
+          aria-label="Добавить"
+          data-testid="add-source-submit"
+        >
+          <SendIcon size={14} />
+        </button>
+      </div>
+      <p className="mt-1.5 px-1 text-[10px] leading-snug text-muted">
+        Ссылка на страницу или YouTube — добавим как источник. Обычный текст —
+        поищем в вебе.
+      </p>
+    </form>
   );
 }
 
@@ -538,9 +643,17 @@ function ConfirmDialog({
 // Add URL — streams progress
 // ============================================================
 
-function AddUrlDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
+function AddUrlDialog({
+  notebookId,
+  onClose,
+  initialValue = '',
+}: {
+  notebookId: string;
+  onClose: () => void;
+  initialValue?: string;
+}) {
   const qc = useQueryClient();
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(initialValue);
   const [title, setTitle] = useState('');
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [running, setRunning] = useState(false);
@@ -620,10 +733,19 @@ function AddUrlDialog({ notebookId, onClose }: { notebookId: string; onClose: ()
 // Add YouTube — streams progress
 // ============================================================
 
-function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
+function AddYoutubeDialog({
+  notebookId,
+  onClose,
+  initialValue = '',
+}: {
+  notebookId: string;
+  onClose: () => void;
+  initialValue?: string;
+}) {
   const qc = useQueryClient();
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(initialValue);
   const [title, setTitle] = useState('');
+  const [asr, setAsr] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [running, setRunning] = useState(false);
 
@@ -631,11 +753,14 @@ function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose
     if (!url || running) return;
     setRunning(true);
     setProgress(INITIAL_PROGRESS);
-    const stream = api.ingestYoutubeSourceStream(
-      notebookId,
-      { url, title: title || undefined },
-      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
-    );
+    const body = { url, title: title || undefined };
+    const stream = asr
+      ? api.ingestYoutubeAsrSourceStream(notebookId, body, (delta) =>
+          setProgress((prev) => progressFromDelta(delta, prev)),
+        )
+      : api.ingestYoutubeSourceStream(notebookId, body, (delta) =>
+          setProgress((prev) => progressFromDelta(delta, prev)),
+        );
     stream.promise
       .then(() => {
         qc.invalidateQueries({ queryKey: ['sources', notebookId] });
@@ -674,101 +799,32 @@ function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose
               onChange={(e) => setTitle(e.target.value)}
             />
           </div>
+          <label
+            className="flex cursor-pointer items-start gap-2 rounded-xl border p-2.5"
+            style={{ borderColor: 'rgb(var(--nb-border))' }}
+          >
+            <input
+              type="checkbox"
+              checked={asr}
+              onChange={(e) => setAsr(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-xs">
+              <span className="font-medium text-ink">Распознать речь (Whisper ASR)</span>
+              <span className="mt-0.5 block text-muted">
+                Скачает аудио через <code>yt-dlp</code> и распознает локальным
+                Whisper на <code>127.0.0.1:8000</code>. Медленнее, но работает
+                там, где YouTube не отдаёт субтитры.
+              </span>
+            </span>
+          </label>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Отмена
             </button>
             <button type="submit" className="btn btn-primary" disabled={!url}>
               <PlusIcon size={13} />
-              Добавить
-            </button>
-          </div>
-        </form>
-      )}
-      {(running || progress.error) && <ProgressStepper progress={progress} />}
-      {progress.error && (
-        <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="btn btn-secondary">
-            Закрыть
-          </button>
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-// ============================================================
-// YouTube → ASR — local Whisper pipeline (slower than transcript,
-// but works when YouTube requires login to expose captions)
-// ============================================================
-
-function AddYoutubeAsrDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
-  const [running, setRunning] = useState(false);
-
-  function start() {
-    if (!url || running) return;
-    setRunning(true);
-    setProgress(INITIAL_PROGRESS);
-    const stream = api.ingestYoutubeAsrSourceStream(
-      notebookId,
-      { url, title: title || undefined },
-      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
-    );
-    stream.promise
-      .then(() => {
-        qc.invalidateQueries({ queryKey: ['sources', notebookId] });
-        onClose();
-      })
-      .catch((err: Error) => setProgress((p) => ({ ...p, error: err.message })))
-      .finally(() => setRunning(false));
-  }
-
-  return (
-    <Dialog title="YouTube → распознать" onClose={onClose}>
-      {!running && !progress.error && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            start();
-          }}
-          className="space-y-3"
-        >
-          <p className="text-sm text-muted-foreground">
-            Скачает аудио через <code>yt-dlp</code> и распознает речь локальным
-            Whisper на <code>127.0.0.1:8000</code>. Медленнее, чем обычный
-            YouTube (ещё скачивание + ASR), но работает там, где YouTube не
-            отдаёт сабы.
-          </p>
-          <div>
-            <label className="section-label mb-1.5 block">URL или ID видео</label>
-            <input
-              className="input"
-              placeholder="https://youtube.com/watch?v=…"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              autoFocus
-              required
-            />
-          </div>
-          <div>
-            <label className="section-label mb-1.5 block">Название (опционально)</label>
-            <input
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Отмена
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={!url}>
-              <PlusIcon size={13} />
-              Распознать
+              {asr ? 'Распознать' : 'Добавить'}
             </button>
           </div>
         </form>
@@ -789,10 +845,18 @@ function AddYoutubeAsrDialog({ notebookId, onClose }: { notebookId: string; onCl
 // Discover — streams progress per URL
 // ============================================================
 
-function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
+function DiscoverDialog({
+  notebookId,
+  onClose,
+  initialQuery = '',
+}: {
+  notebookId: string;
+  onClose: () => void;
+  initialQuery?: string;
+}) {
   const qc = useQueryClient();
   const [stepName, setStepName] = useState<'query' | 'preview' | 'ingest'>('query');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SearchPreviewResult[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -805,6 +869,17 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
       setStepName('preview');
     },
   });
+
+  // When the "add source" bar hands us a query, run the search straight
+  // away so the user lands on the results step instead of an empty form.
+  const preview = previewMutation.mutate;
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (initialQuery.trim() && !autoRan.current) {
+      autoRan.current = true;
+      preview();
+    }
+  }, [initialQuery, preview]);
 
   function startIngest() {
     if (selected.size === 0) return;
