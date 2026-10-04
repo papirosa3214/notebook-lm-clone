@@ -176,6 +176,11 @@ mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/sa
 одним голосом (на macOS нет двух стабильно доступных русских
 голосов). STAGE → 0.8 s silence. Output: 96 kbps mono MP3.
 
+После генерации UI показывает встроенный `<audio controls>` плеер
+сразу в диалоге Audio Overview (в фазе `done`) и в
+`ArtifactsPanel` при открытии артефакта. Скачать mp3 можно
+кнопкой «Скачать .mp3» под плеером.
+
 Для разных голосов (будущие провайдеры):
 - `openai` — `OPENAI_API_KEY` (не реализован)
 - `kokoro` — `KOKORO_BASE_URL` (не реализован)

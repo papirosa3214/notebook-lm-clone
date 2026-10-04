@@ -147,11 +147,36 @@ hover popover показывает snippet + кнопку перехода в so
 реальный подкаст двумя голосами (пока одинаковыми) с паузами,
 транскрипт + mp3 в ArtifactsPanel.
 
-### B3. UI (частично)
-- Кнопка и диалог с прогрессом уже есть (B1).
-- Карточка-результат: пока показывается транскрипт в диалоге.
-  Когда TTS подключим, добавим в ArtifactsPanel `<audio controls>`
-  + блок с метаданными (style, lineCount, duration).
+### B3. UI — **сделано** (текущая ветка, 2 коммита)
+- `apps/web/src/components/AudioPlayer.tsx` (новый):
+  - generic `<audio controls>` обёртка с download button
+  - `onError` → кастомный `onErrorHint` вместо браузерного
+    MEDIA_ERR (бесполезно для пользователя)
+  - title / meta ряд над плеером (style · lineCount · duration)
+  - data-testid для всех ключевых элементов
+- `apps/web/src/lib/api.ts`:
+  - `audioUrlByFilename(notebookId, audioFilename)` — helper
+    для построения URL из `meta.audioFilename` напрямую
+- `apps/web/src/components/AudioOverviewDialog.tsx`:
+  - в done-фазе с `meta.audioFilename !== null` рендерит
+    AudioPlayer + meta (style · lineCount · MM:SS) +
+    кнопку Скачать
+  - в script-only (noop) — старый hint
+  - обновлён устаревший текст "TTS в режиме noop, аудио
+    после подключения" — теперь TTS реально работает
+- `apps/web/src/components/ArtifactsPanel.tsx`:
+  - `detectSpecialRender` теперь возвращает 4 значения:
+    `flashcards | data_table | audio_overview | markdown`
+  - `kind === 'audio_overview'` → AudioOverviewPlayer
+    + textarea с markdown-сценарием
+  - script-only (`meta.audioFilename === null`) →
+    специальный empty-state с подсказкой
+  - `AudioOverviewPlayer` обёртка парсит meta и передаёт
+    в AudioPlayer (style, duration, lineCount)
+  - `meta.status === 'failed'` → красный hint "TTS упал"
+- Тесты: 5 unit на AudioPlayer (render/src/controls/error/data-testid),
+  13 unit на meta-helpers (parseAudioFilename/parseStatus/
+  styleFromMeta/durationFromMeta/lineCountFromContent)
 
 **DoD скрипт-first:** добавил 3 URL → нажал Audio Overview → видишь
 транскрипт построчно, через ~30 сек артефакт сохранён с
