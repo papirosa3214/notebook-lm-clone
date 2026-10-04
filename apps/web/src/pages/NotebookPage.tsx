@@ -477,6 +477,11 @@ export default function NotebookPage() {
               <ChatPanel
                 notebookId={notebookId}
                 onSaveArtifact={(question, answer, citations) => {
+                  // Make sure the user actually sees the note we're about
+                  // to create — "save to notes" with the panel collapsed
+                  // used to be a silent no-op from the user's point of
+                  // view.
+                  if (layout.notesCollapsed) setNotesCollapsed(false);
                   setPrefilled(buildArtifactMarkdown(question, answer, citations));
                 }}
                 onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
@@ -565,6 +570,11 @@ export default function NotebookPage() {
               <ChatPanel
                 notebookId={notebookId}
                 onSaveArtifact={(question, answer, citations) => {
+                  // Make sure the user actually sees the note we're about
+                  // to create — "save to notes" with the panel collapsed
+                  // used to be a silent no-op from the user's point of
+                  // view.
+                  if (layout.notesCollapsed) setNotesCollapsed(false);
                   setPrefilled(buildArtifactMarkdown(question, answer, citations));
                 }}
                 onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}

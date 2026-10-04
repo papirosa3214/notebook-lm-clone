@@ -34,6 +34,16 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
     queryFn: () => api.listArtifacts(notebookId),
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Highlights the just-created note for a moment so the user can see
+  // that their "save to notes" click actually did something. The chat
+  // button is in a different column; without this the only feedback
+  // is that a new row appears in the list, which is easy to miss.
+  const [pulseId, setPulseId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pulseId) return;
+    const t = setTimeout(() => setPulseId(null), 2400);
+    return () => clearTimeout(t);
+  }, [pulseId]);
 
   const create = useMutation({
     mutationFn: ({ title, contentMd }: { title: string; contentMd: string }) =>
@@ -41,6 +51,7 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
     onSuccess: (a) => {
       qc.invalidateQueries({ queryKey: ['artifacts', notebookId] });
       setSelectedId(a.id);
+      setPulseId(a.id);
       onConsumedPrefilled?.();
     },
   });
@@ -163,7 +174,10 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
               return (
                 <li
                   key={a.id}
-                  className="source-pill group cursor-pointer"
+                  className={
+                    'source-pill group cursor-pointer transition-all ' +
+                    (a.id === pulseId ? 'ring-2 ring-accent animate-pulse-once' : '')
+                  }
                   onClick={() => setSelectedId(a.id)}
                   data-testid={`artifact-list-item-${a.id}`}
                 >

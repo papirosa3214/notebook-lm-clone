@@ -107,7 +107,12 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     () =>
       messages
         .filter((m) => !m.pending && !m.error && m.content.trim().length > 0)
-        .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt })),
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+          citations: m.citations,
+        })),
     [messages],
   );
 

@@ -43,21 +43,63 @@ describe('answerAsMarkdown', () => {
 });
 
 describe('conversationAsMarkdown', () => {
-  it('renders each turn with its role and timestamp', () => {
+  it('renders a titled note with each Q/A as its own section', () => {
     const md = conversationAsMarkdown('Разговор', [
-      { role: 'user', content: 'Вопрос', createdAt: '2026-10-04T09:30:00.000Z' },
-      { role: 'assistant', content: 'Ответ', createdAt: '2026-10-04T09:31:00.000Z' },
+      { role: 'user', content: 'Что такое A2A?', createdAt: '2026-10-04T09:30:00.000Z' },
+      {
+        role: 'assistant',
+        content: 'Протокол межагентного взаимодействия.',
+        createdAt: '2026-10-04T09:31:00.000Z',
+        citations: [{ sourceTitle: 'Статья', text: 'A2A — протокол.' }],
+      },
+      { role: 'user', content: 'А MCP?', createdAt: '2026-10-04T09:32:00.000Z' },
+      {
+        role: 'assistant',
+        content: 'Model Context Protocol.',
+        createdAt: '2026-10-04T09:33:00.000Z',
+      },
     ]);
+
     expect(md).toContain('# Разговор');
-    expect(md).toContain('## Вопрос');
-    expect(md).toContain('## Ответ');
-    expect(md).toContain('Вопрос');
-    expect(md).toContain('Ответ');
+    expect(md).toMatch(/Создано:/);
+    expect(md).toContain('## Содержание');
+    expect(md).toContain('## 1. Что такое A2A?');
+    expect(md).toContain('## 2. А MCP?');
+    expect(md).toContain('Протокол межагентного взаимодействия');
+    expect(md).toContain('Model Context Protocol');
+    // Citations go into the answer block AND the final sources list, but
+    // only once each.
+    expect(md).toContain('## Источники');
+    expect((md.match(/Статья/g) || []).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('omits the stamp when a turn has no timestamp', () => {
-    const md = conversationAsMarkdown('R', [{ role: 'user', content: 'x' }]);
-    expect(md).toContain('## Вопрос\n');
+  it('uses the first user question as the title when none is supplied', () => {
+    const md = conversationAsMarkdown('', [
+      { role: 'user', content: 'Что такое A2A?' },
+      { role: 'assistant', content: 'Протокол.' },
+    ]);
+    expect(md.split('\n')[0]).toBe('# Что такое A2A?');
+  });
+
+  it('drops user questions that have no assistant reply', () => {
+    const md = conversationAsMarkdown('R', [
+      { role: 'user', content: 'Без ответа' },
+      { role: 'user', content: 'С ответом' },
+      { role: 'assistant', content: 'Ответ' },
+    ]);
+    expect(md).toContain('## 1. С ответом');
+    expect(md).not.toContain('Без ответа');
+    expect(md).toMatch(/1 вопрос без ответа пропущен/);
+  });
+
+  it('renders a single Q/A pair without a content index', () => {
+    const md = conversationAsMarkdown('R', [
+      { role: 'user', content: 'Вопрос' },
+      { role: 'assistant', content: 'Ответ' },
+    ]);
+    expect(md).not.toContain('## Содержание');
+    expect(md).toContain('## 1. Вопрос');
+    expect(md).toContain('Ответ');
   });
 });
 
