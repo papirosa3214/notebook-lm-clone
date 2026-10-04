@@ -203,6 +203,20 @@ mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/sa
 галлюцинаций: модели запрещено добавлять факты, цифры и менять язык
 оригинала. Без выделения операция применяется ко всему тексту.
 
+## Deep Research
+
+Автономный агент: по вопросу сам планирует поисковые запросы, ищет в
+вебе, **добавляет найденные страницы в ноутбук как источники** и пишет
+отчёт с цитатами `[N]`.
+
+Открывается кнопкой **Deep Research** в шапке (или через Command
+Palette на мобильном). Два слайдера ограничивают стоимость прогона:
+сколько запросов генерировать (1–6) и сколько страниц реально
+ингестить (1–10).
+
+Прогон делает ноутбук богаче: источники остаются, отчёт сохраняется в
+заметках. Отключить целиком: `DEEP_RESEARCH_ENABLED=false`.
+
 ## API
 
 | Endpoint | Назначение |
@@ -233,6 +247,7 @@ mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/sa
 | `POST /api/notebooks/:id/artifacts` | Создать |
 | `GET /api/notebooks/:id/studio/templates` | Список шаблонов Studio (FAQ / TL;DR / timeline / contradictions / **flashcards** / **data_table**) |
 | `POST /api/notebooks/:id/suggestions` | SSE: 3 follow-up вопроса по последней паре Q/A (503 если `SUGGESTIONS_ENABLED=false`) |
+| `POST /api/notebooks/:id/deep-research` | SSE: автономное исследование (plan → search → ingest → отчёт); 503 если `DEEP_RESEARCH_ENABLED=false` |
 | `POST /api/notebooks/:id/artifacts/studio` | Сгенерировать Studio-отчёт (SSE: citations → token* → done), persist `kind='report'` |
 | `POST /api/notebooks/:id/share` | Включить read-only шаринг, вернуть `shareToken` + `shareUrl` |
 | `GET /api/notebooks/:id/share` | Текущее состояние шаринга |

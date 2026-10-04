@@ -493,5 +493,41 @@ worker кэширует app shell для офлайн-первого-старт�
 - Собственный TTS с нуля (только готовое).
 - Сложный GraphRAG (graph у нас уже подключён в retrieval, но не как
   основной путь).
-- «Deep Research» с обходом многих сайтов и планированием (см. P1
-  в gap-доке) — отдельный большой milestone, не часть Studio v1.
+
+---
+
+## Milestone G — Deep Research (P1, XL) — **сделано**
+
+Ранее был в out-of-scope; objective явно требует его, поэтому реализован.
+
+Автономный агент: **plan → search → ingest → synthesise**.
+
+- `packages/shared`:
+  - `DeepResearchRequest` (question, maxQueries 1-6, maxSources 1-10,
+    resultsPerQuery 1-10, provider?, model?)
+  - `DeepResearchDelta` (SSE): `phase` | `queries` | `hit` | `token` |
+    `done` | `error`
+  - `DeepResearchMeta` (`template='deep_research'`, status, question,
+    queries, ingestedSources, sourceCount, citationCount, model,
+    error, timestamps)
+- `apps/api/src/routes/deepResearch.ts` —
+  `POST /api/notebooks/:id/deep-research`:
+  1. **planning** — LLM превращает вопрос в N поисковых запросов
+     (`parseJsonArray` терпит fences/prose; если планировщик вернул
+     мусор — поиск идёт по исходному вопросу, а не падает)
+  2. **searching** — DuckDuckGo через `searchWeb()`, дедуп по URL;
+     падение одного запроса не роняет весь прогон
+  3. **fetching** — скачивание + чанкинг + эмбеддинг каждой страницы
+     как **настоящего источника** (`sources` row + `addSourceText`);
+     на каждый URL — `hit` event с `ingested: true/false`
+  4. **synthesizing** — `retrieveWithRerank` по свежему корпусу,
+     стрим Markdown-отчёта с `[N]`-цитатами; персистится один
+     артефакт `kind='report'`, `meta.template='deep_research'`
+- Прогон **делает ноутбук богаче** — как в NotebookLM.
+- `DEEP_RESEARCH_ENABLED=false` → 503 (для air-gapped инсталляций).
+- UI: `DeepResearchDialog` (вопрос + два слайдера-капа, чеклист из
+  4 фаз, чипы запросов, список найденных страниц, живой превью-отчёт).
+  Кнопка в шапке + запись в Command Palette (для мобильных).
+- Тесты: 5 e2e на бэкенде (happy path с проверкой БД, fallback
+  планировщика, «ни одна страница не загрузилась», 404, 400) +
+  5 unit на диалог.
