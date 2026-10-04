@@ -5,6 +5,7 @@ import type { Artifact } from '../lib/types';
 import { FlashcardDeck } from './FlashcardDeck';
 import { DataTableView } from './DataTableView';
 import { AudioPlayer } from './AudioPlayer';
+import { AiEditMenu } from './AiEditMenu';
 import type { AudioOverviewMeta } from '@notebook/shared';
 import {
   PlusIcon,
@@ -283,14 +284,13 @@ function ArtifactEditor({
       )}
       {specialRender === 'markdown' && (
         <>
-          <textarea
-            className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
+          <MarkdownEditor
+            artifactId={artifact.id}
             value={contentMd}
-            onChange={(e) => {
-              setContentMd(e.target.value);
+            onChange={(v) => {
+              setContentMd(v);
               setDirty(true);
             }}
-            placeholder="Текст заметки в Markdown…"
           />
           {dirty && (
             <p className="mt-2 text-center text-[11px] font-medium text-accent">
@@ -300,6 +300,91 @@ function ArtifactEditor({
         </>
       )}
     </div>
+  );
+}
+
+/** Markdown text editor with the AI assist popover. The popover
+ *  shows up when the user selects at least one character; clicks
+ *  run the corresponding LLM edit and replace the selection with
+ *  the streamed output. */
+function MarkdownEditor({
+  artifactId,
+  value,
+  onChange,
+}: {
+  artifactId: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const [menu, setMenu] = useState<{
+    selection: string;
+    start: number;
+    end: number;
+    anchor: { x: number; y: number };
+  } | null>(null);
+
+  function refreshMenu() {
+    const ta = taRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    if (start === end) {
+      setMenu(null);
+      return;
+    }
+    const sel = value.slice(start, end);
+    // Get pixel coordinates of the selection's *end* using a
+    // hidden mirror element. We only use the y for vertical
+    // placement; the x is anchored to the right edge of the
+    // textarea so the menu doesn't overflow horizontally.
+    const rect = ta.getBoundingClientRect();
+    const anchor = { x: rect.right - 4, y: rect.top + 4 };
+    setMenu({ selection: sel, start, end, anchor });
+  }
+
+  return (
+    <>
+      <textarea
+        ref={taRef}
+        className="textarea min-h-0 flex-1 font-mono text-[13px] leading-relaxed"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onSelect={refreshMenu}
+        onMouseUp={refreshMenu}
+        onKeyUp={refreshMenu}
+        onBlur={() => {
+          // Give the click a tick to register on the menu before
+          // we dismiss. We only fire on `relatedTarget` outside
+          // the menu in the next iteration if needed; for now
+          // we leave the menu up so the user can click it.
+        }}
+        placeholder="Текст заметки в Markdown…"
+        data-testid="markdown-editor"
+      />
+      {menu && (
+        <AiEditMenu
+          artifactId={artifactId}
+          fullText={value}
+          selection={menu.selection}
+          selectionStart={menu.start}
+          selectionEnd={menu.end}
+          anchor={menu.anchor}
+          onDismiss={() => setMenu(null)}
+          onError={(msg) => {
+            // eslint-disable-next-line no-console
+            console.error('[ai-edit]', msg);
+            setMenu(null);
+          }}
+          onReplace={(newText) => {
+            const before = value.slice(0, menu.start);
+            const after = value.slice(menu.end);
+            onChange(before + newText + after);
+            setMenu(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
