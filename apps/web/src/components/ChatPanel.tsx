@@ -683,6 +683,22 @@ function renderInline(
   citations: CitationChunk[] | undefined,
   onOpenCitation: ((chunk: CitationChunk, index: number) => void) | undefined,
 ): React.ReactNode {
+  // Defensive: an edge case in the citation / bold parser was crashing
+  // the whole chat panel. If anything throws, fall back to plain text
+  // for that line so the panel still renders.
+  try {
+    return renderInlineUnsafe(text, citations, onOpenCitation);
+  } catch (e) {
+    console.error('[renderInline] fell back to plain text', e);
+    return text;
+  }
+}
+
+function renderInlineUnsafe(
+  text: string,
+  citations: CitationChunk[] | undefined,
+  onOpenCitation: ((chunk: CitationChunk, index: number) => void) | undefined,
+): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
