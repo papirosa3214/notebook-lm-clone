@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
+import { useSwipe } from '../lib/useSwipe';
 import { SourcesPanel } from '../components/SourcesPanel';
 import { SourceDetailSheet } from '../components/SourceDetailSheet';
 import { SourceScopeProvider } from '../lib/sourceScopeContext';
@@ -217,6 +218,22 @@ export default function NotebookPage() {
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
 
+  // Mobile swipe between tabs. The handler is always attached; on
+  // desktop ≥ 640 px the tabs are hidden so setMobileTab is a no-op
+  // visually but harmless. The hook is gated by a CSS class on the
+  // main element so swipe is only enabled at the mobile breakpoint.
+  const TABS: MobileTab[] = ['sources', 'overview', 'chat', 'artifacts'];
+  const swipeRef = useSwipe<HTMLElement>({
+    onSwipeLeft: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i >= 0 && i < TABS.length - 1) setMobileTab(TABS[i + 1]!);
+    },
+    onSwipeRight: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i > 0) setMobileTab(TABS[i - 1]!);
+    },
+  });
+
   return (
     <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
       <div className="flex h-screen flex-col">
@@ -323,7 +340,7 @@ export default function NotebookPage() {
           744 CSS px wide, which is enough for Sources + Chat with notes
           collapsed. Tailwind's default md cutoff (768px) made that desktop
           window look like an unfinished mobile screen. */}
-      <nav className="flex shrink-0 gap-1 border-b px-2 py-2 min-[640px]:hidden"
+      <nav className="flex shrink-0 items-center gap-1 border-b px-2 py-2 min-[640px]:hidden"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <MobileTabBtn active={mobileTab === 'sources'} onClick={() => setMobileTab('sources')}>
           Источники
@@ -342,6 +359,26 @@ export default function NotebookPage() {
         <MobileTabBtn active={mobileTab === 'artifacts'} onClick={() => setMobileTab('artifacts')}>
           Заметки
         </MobileTabBtn>
+        {/* Page indicator — four dots, the active one filled.
+            Screen readers expose each dot as a labelled "Tab N of 4". */}
+        <div
+          className="ml-auto flex items-center gap-1.5"
+          aria-label={`Вкладка ${TABS.indexOf(mobileTab) + 1} из ${TABS.length}`}
+          data-testid="mobile-tab-indicator"
+        >
+          {TABS.map((t) => (
+            <span
+              key={t}
+              className={
+                'h-1.5 rounded-full transition-all ' +
+                (t === mobileTab
+                  ? 'w-4 bg-accent'
+                  : 'w-1.5 bg-muted/40')
+              }
+              aria-hidden
+            />
+          ))}
+        </div>
       </nav>
 
       {/* ---- NotebookLM-style layout: horizontal source strip + chat ---- */}
@@ -409,7 +446,11 @@ export default function NotebookPage() {
         </div>
 
         {/* CENTER */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 min-[640px]:gap-5 min-[640px]:p-6">
+        <main
+          ref={swipeRef}
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 min-[640px]:gap-5 min-[640px]:p-6"
+          data-testid="notebook-center"
+        >
           <div className={mobileTab === 'sources' ? 'min-[640px]:hidden' : 'hidden'}>
             <div className="card overflow-hidden">
               <SourcesPanel notebookId={notebookId} />
