@@ -22,8 +22,23 @@ import type {
 
 class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
-    super(typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : `HTTP ${status}`);
+    super(apiErrorMessage(status, body));
   }
+}
+
+/**
+ * Pick the most human-readable message out of an error body. Routes
+ * return `{ error: 'machine-readable-code', detail: 'что случилось
+ * по-русски' }`; the detail is what belongs in front of the user, and
+ * showing the code instead ("mindmap needs sources") is a bug.
+ */
+function apiErrorMessage(status: number, body: unknown): string {
+  if (body && typeof body === 'object') {
+    const b = body as { detail?: unknown; error?: unknown };
+    if (typeof b.detail === 'string' && b.detail.trim()) return b.detail;
+    if (typeof b.error === 'string' && b.error.trim()) return b.error;
+  }
+  return `HTTP ${status}`;
 }
 
 async function http<T>(path: string, init: RequestInit = {}): Promise<T> {

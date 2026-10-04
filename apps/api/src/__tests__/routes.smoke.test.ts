@@ -17,7 +17,7 @@
 import { afterAll, beforeAll, test } from 'vitest';
 import assert from 'node:assert/strict';
 import { withApiTestEnv } from './helpers.js';
-import { notebooks, sources } from '../db/schema.js';
+import { artifacts, notebooks, sources } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 
 const env = withApiTestEnv();
@@ -69,10 +69,51 @@ beforeAll(async () => {
       status: 'ready',
     })
     .run();
+
+  // A source row alone is not enough: retrieval reads chunks. Without
+  // one the mindmap has nothing to map and now refuses (see the 409
+  // regression test below) instead of inventing a topic.
+  const raw = await env.getRawSqlite();
+  const dummyVec = Buffer.from(
+    new Float32Array(Array.from({ length: 1024 }, (_, i) => 0.01 + (i % 7) * 0.001)).buffer,
+  );
+  const vecRowid = Number(raw.prepare('INSERT INTO vec_chunks (embedding) VALUES (?)').run(dummyVec).lastInsertRowid);
+  raw
+    .prepare(
+      `INSERT INTO chunks (vec_rowid, notebook_id, source_id, kind, title, url, content, ordinal)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(vecRowid, 'nb_smoke', 'src_1', 'url', 'A', null, 'Концепция A связана с концепцией B.', 0);
 });
 
 afterAll(async () => {
   await env.restore();
+});
+
+test('POST /api/notebooks/:id/mindmap refuses instead of inventing a topic (no chunks)', async () => {
+  // nb_other has a sources row but no chunks, so there is nothing to
+  // map. The route used to pass "(нет фрагментов — сгенерируй из общего
+  // знания о теме)" to the model, which produced confident mind maps
+  // about entirely unrelated subjects inside empty notebooks.
+  env.mockOllama({ chatText: MINDMAP_JSON });
+  try {
+    const app = await env.getApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/notebooks/nb_other/mindmap',
+      payload: {},
+    });
+    assert.equal(res.statusCode, 409, `expected 409, got ${res.statusCode}: ${res.body}`);
+    const body = res.json() as { detail?: string };
+    assert.match(body.detail ?? '', /источник/i, 'detail explains the missing sources');
+
+    // Nothing was persisted.
+    const db = await env.getDb();
+    const rows = db.select().from(artifacts).where(eq(artifacts.notebookId, 'nb_other')).all();
+    assert.equal(rows.length, 0, 'no artifact written for an ungrounded mindmap');
+  } finally {
+    env.unmockOllama();
+  }
 });
 
 test('GET /api/notebooks/:id/sources/:sourceId returns the source when it belongs to the notebook', async () => {

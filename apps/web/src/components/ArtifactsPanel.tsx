@@ -6,6 +6,7 @@ import { FlashcardDeck } from './FlashcardDeck';
 import { DataTableView } from './DataTableView';
 import { AudioPlayer } from './AudioPlayer';
 import { AiEditMenu } from './AiEditMenu';
+import { useSourceScopeContext } from '../lib/sourceScopeContext';
 import type { AudioOverviewMeta } from '@notebook/shared';
 import {
   PlusIcon,
@@ -24,6 +25,10 @@ interface Props {
 
 export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: Props) {
   const qc = useQueryClient();
+  // A mind map is a view over the notebook's own sources; with none
+  // there is nothing to map, so the button stays disabled instead of
+  // letting the model invent a topic.
+  const { hasReady: hasReadySources } = useSourceScopeContext();
   const artifacts = useQuery({
     queryKey: ['artifacts', notebookId],
     queryFn: () => api.listArtifacts(notebookId),
@@ -75,10 +80,15 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
         <div className="ml-auto flex items-center gap-1">
           <button
             onClick={() => mindmap.mutate()}
-            disabled={mindmap.isPending}
+            disabled={mindmap.isPending || !hasReadySources}
             className="flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium text-muted transition-all hover:bg-surface-tint disabled:opacity-40"
             style={{ borderColor: 'rgb(var(--nb-border))' }}
-            title="Сгенерировать майнд-карту ключевых концепций"
+            title={
+              hasReadySources
+                ? 'Сгенерировать майнд-карту ключевых концепций'
+                : 'Сначала добавьте источники — карта строится только по материалам ноутбука'
+            }
+            data-testid="gen-mindmap"
           >
             🧠 Майнд-карта
           </button>
@@ -98,6 +108,16 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
           </button>
         </div>
       </div>
+
+      {mindmap.isError && (
+        <p
+          className="mx-4 mb-2 rounded-xl border px-3 py-2 text-[11px] text-red-600"
+          style={{ borderColor: 'rgb(252 165 165 / 0.5)' }}
+          data-testid="mindmap-error"
+        >
+          {mindmap.error instanceof Error ? mindmap.error.message : 'Не удалось построить майнд-карту'}
+        </p>
+      )}
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">

@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
-import { artifacts, notebooks } from '../db/schema.js';
+import { artifacts, notebooks, sources } from '../db/schema.js';
 import { retrieveWithRerank } from '../vectordb/client.js';
 import { getProvider } from '../providers/index.js';
 import type { ChatStreamEvent } from '@notebook/shared/providers';
@@ -52,16 +52,37 @@ export const mindmapRoutes: FastifyPluginAsync = async (app) => {
 
       const focus = parsed.data.focus ?? 'основные концепции и связи между ними';
 
-      // Pull chunks; if there are too few the mind map will be tiny —
-      // that's an honest signal to the user, not a failure.
+      // Pull chunks. A mind map is a view over the notebook's own
+      // material, so with nothing retrieved there is nothing to map —
+      // we refuse rather than let the model invent a topic. (It used to
+      // be told "generate from general knowledge", which produced
+      // confident, completely unrelated maps inside empty notebooks.)
       let chunks: Awaited<ReturnType<typeof retrieveWithRerank>> = [];
+      let retrievalFailed = false;
       try {
         chunks = await retrieveWithRerank(req.params.id, focus, 12, {
           provider: nb.defaultProvider,
           model: nb.defaultModel,
         });
       } catch {
-        // fall through with empty chunks — LLM will be told
+        retrievalFailed = true;
+      }
+
+      const readySources = db
+        .select({ id: sources.id })
+        .from(sources)
+        .where(eq(sources.notebookId, req.params.id))
+        .all()
+        .length;
+      if (chunks.length === 0) {
+        return reply.code(409).send({
+          error: 'mindmap needs sources',
+          detail:
+            readySources === 0
+              ? 'В ноутбуке нет источников. Добавьте хотя бы один — майнд-карта строится только по материалам ноутбука.'
+              : 'Не удалось получить фрагменты источников для майнд-карты. Попробуйте позже.',
+          retrievalFailed,
+        });
       }
 
       const context = chunks
@@ -76,7 +97,7 @@ export const mindmapRoutes: FastifyPluginAsync = async (app) => {
         'Только валидные id в edges (id из nodes). Без markdown-обёрток.',
       ].join('\n');
 
-      const userPrompt = `Фокус: ${focus}\n\nФрагменты:\n${context || '(нет фрагментов — сгенерируй из общего знания о теме)'}`;
+      const userPrompt = `Фокус: ${focus}\n\nФрагменты:\n${context}`;
 
       const providerId = nb.defaultProvider as 'ollama' | 'anthropic' | 'openai';
       const provider = getProvider(providerId);
