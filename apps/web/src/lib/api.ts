@@ -11,6 +11,7 @@ import type {
   Source,
 } from './types';
 import type {
+  AiEditDelta,
   AudioOverviewDelta,
   AudioOverviewLine,
   AudioOverviewMeta,
@@ -333,6 +334,20 @@ export const api = {
     http<NotebookShare>(`/api/notebooks/${notebookId}/share`, { method: 'POST' }),
   revokeShare: (notebookId: string) =>
     http<void>(`/api/notebooks/${notebookId}/share`, { method: 'DELETE' }),
+
+  // Inline AI note assist — streams an LLM edit of a chunk of the
+  // artifact body. See openAiEditStream below for the implementation.
+  aiEditStream: (
+    artifactId: string,
+    body: {
+      instruction: 'rewrite' | 'expand' | 'shorten';
+      selection: string;
+      fullText: string;
+      provider?: ProviderId;
+      model?: string;
+    },
+    onDelta: (delta: AiEditDelta) => void,
+  ): AiEditStreamHandle => openAiEditStream(artifactId, body, onDelta),
 };
 
 /** Public, no-auth snapshot fetch for the /shared/:token viewer page. */
@@ -345,7 +360,13 @@ export async function fetchSharedNotebook(token: string): Promise<SharedNotebook
 }
 
 export { ApiError };
-export type { ChatDelta };
+export type { AiEditDelta, ChatDelta };
+
+/** Handle returned by `api.aiEditStream`. */
+export interface AiEditStreamHandle {
+  promise: Promise<{ output: string }>;
+  abort: () => void;
+}
 
 // ----- SSE ingest helper -----
 
@@ -428,3 +449,57 @@ function openIngestStream<T>(
   })();
   return { promise, abort: () => controller.abort() };
 }
+
+
+function openAiEditStream(
+  artifactId: string,
+  body: {
+    instruction: 'rewrite' | 'expand' | 'shorten';
+    selection: string;
+    fullText: string;
+    provider?: ProviderId;
+    model?: string;
+  },
+  onDelta: (delta: AiEditDelta) => void,
+): AiEditStreamHandle {
+  const controller = new AbortController();
+  const promise = (async () => {
+      const res = await fetch(`/api/artifacts/${artifactId}/ai-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '');
+        throw new ApiError(res.status, text);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let output: string | null = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n\n')) !== -1) {
+          const block = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+          if (!dataLine) continue;
+          try {
+            const payload = JSON.parse(dataLine.slice(5).trim()) as AiEditDelta;
+            if (payload.type === 'done') output = payload.output;
+            onDelta(payload);
+          } catch {
+            // ignore malformed
+          }
+        }
+        if (output !== null) break;
+      }
+      if (output === null) throw new Error('stream closed without done event');
+      return { output };
+    })();
+    return { promise, abort: () => controller.abort() };
+  }
