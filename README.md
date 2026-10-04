@@ -190,6 +190,19 @@ mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/sa
 - `openai` — `OPENAI_API_KEY` (не реализован)
 - `kokoro` — `KOKORO_BASE_URL` (не реализован)
 
+## Inline AI note assist
+
+В markdown-редакторе артефакта (`ArtifactsPanel`) выдели фрагмент
+текста — появится плавающее меню с тремя действиями:
+
+- **Переписать** — сохранить смысл, улучшить формулировки.
+- **Расширить** — добавить подробностей и примеров.
+- **Сократить** — убрать второстепенное, оставить суть.
+
+Ответ стримится по SSE и заменяет выделение. Промпты защищены от
+галлюцинаций: модели запрещено добавлять факты, цифры и менять язык
+оригинала. Без выделения операция применяется ко всему тексту.
+
 ## API
 
 | Endpoint | Назначение |
@@ -228,6 +241,7 @@ mac-say — zero-deps, offline, бесплатный TTS через `/usr/bin/sa
 | `GET /api/notebooks/:id/export.zip` | Streaming .zip со всеми источниками, артефактами, README и историей чата |
 | `GET /api/artifacts/:id` | Прочитать |
 | `PATCH /api/artifacts/:id` | Обновить title/contentMd |
+| `POST /api/artifacts/:id/ai-edit` | SSE: LLM-редактура выделения (`rewrite` / `expand` / `shorten`) → token* → done |
 | `GET /api/artifacts/:id/download` | Скачать как `.md` |
 | `DELETE /api/artifacts/:id` | Удалить |
 

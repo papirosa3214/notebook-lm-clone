@@ -436,10 +436,38 @@ worker кэширует app shell для офлайн-первого-старт�
   6 unit на `SuggestionsChips` (loading, render, click, 503,
   error, abort).
 
-### F2. Inline AI note assist — следующая итерация
-- Text selection в `ArtifactsPanel` editor → контекстное меню
-  «Переписать / Расширить / Сжать». `POST /api/artifacts/:id/ai-edit`
-  со streaming-ответом, вставка в editor.
+### F2. Inline AI note assist — **сделано** (текущая ветка, 4 коммита)
+- `packages/shared`:
+  - `AiEditInstruction`: 'rewrite' | 'expand' | 'shorten'
+  - `AiEditRequest`: instruction, selection, fullText,
+    provider?, model?
+  - `AiEditDelta` (SSE): token | done { output } | error
+- `apps/api/src/routes/aiEdit.ts`:
+  - `POST /api/artifacts/:id/ai-edit` (SSE)
+  - 3 system prompts: rewrite/expand/shorten с явными
+    guard-rails (не добавлять факты, сохранять язык, не
+    придумывать цифры)
+  - selection помечается `<<<TARGET>>>/<<<END>>>` тегами
+  - fallback на fullText когда selection пустая
+  - 404 на unknown artifact, 400 на невалидный instruction
+- `apps/web/src/lib/api.ts`:
+  - `api.aiEditStream(artifactId, body, onDelta)` — SSE helper
+  - `AiEditStreamHandle` интерфейс (promise + abort)
+- `apps/web/src/components/AiEditMenu.tsx`:
+  - floating popover с 3 actions: Переписать / Расширить /
+    Сократить
+  - busy state per-action, прогресс-индикатор
+  - AbortController на unmount
+- `apps/web/src/components/ArtifactsPanel.tsx`:
+  - `MarkdownEditor` обёртка: textarea + AiEditMenu
+  - onSelect/onMouseUp/onKeyUp обновляют selection state
+  - anchor = (textarea.right, textarea.top)
+  - onReplace: `slice(0, start) + newText + slice(end)`
+- Тесты: 6 e2e (rewrite/expand/shorten/empty selection/
+  unknown artifact/invalid instruction/LLM error) +
+  7 unit на AiEditMenu (null anchor / 3 buttons / onReplace
+  / instruction name forwarded / SSE error / fetch reject /
+  dismiss button)
 
 ### F3. Multi-format previews
 - `GET /api/sources/:id/preview`:
