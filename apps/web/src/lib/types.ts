@@ -68,6 +68,10 @@ export interface ChatMessage {
   citations?: CitationChunk[];
   pending?: boolean;
   error?: string;
+  /** ISO time the row was persisted. Carried so the UI can stamp each
+   *  answer — the API has always returned it, the client used to drop
+   *  it during the history → state mapping. */
+  createdAt?: string;
 }
 
 // Summary (matches API's SummaryDelta discriminated union)

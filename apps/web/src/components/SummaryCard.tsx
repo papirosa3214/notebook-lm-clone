@@ -8,6 +8,9 @@ import {
   refreshSummary,
   subscribeSummary,
 } from '../lib/summaryStore';
+import { MessageActions } from './MessageActions';
+import { SuggestionsChips } from './SuggestionsChips';
+import { formatDateTime } from '../lib/download';
 
 /**
  * Renders the notebook summary as the first ("pinned") message inside
@@ -23,9 +26,19 @@ interface Props {
   notebookId: string;
   readyCount: number;
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
+  /** Creates a note artifact from the overview. */
+  onSaveNote?: (content: string, citations: CitationChunk[]) => void;
+  /** Fills the chat input with a suggested question. */
+  onAsk?: (question: string) => void;
 }
 
-export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
+export function SummaryCard({
+  notebookId,
+  readyCount,
+  onOpenCitation,
+  onSaveNote,
+  onAsk,
+}: Props) {
   const state = useSyncExternalStore(
     (fn) => subscribeSummary(notebookId, fn),
     () => getSummaryState(notebookId),
@@ -45,13 +58,10 @@ export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
 
   const { content, citations, savedAt, streaming, error } = state;
 
-  const dateLabel = savedAt
-    ? new Date(savedAt).toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
-    : '';
+  // Full stamp, not just the day: "когда это было сказано" is part of
+  // the question the user asks of a stale overview.
+  const dateLabel = formatDateTime(savedAt);
+  const markdown = `# Краткое содержание\n\n${content.trim()}\n`;
 
   return (
     <div
@@ -102,6 +112,29 @@ export function SummaryCard({ notebookId, readyCount, onOpenCitation }: Props) {
           renderMarkdownWithCitations(content, citations, onOpenCitation)
         )}
       </div>
+
+      {content.length > 0 && (
+        <div className="mt-4 border-t pt-3" style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}>
+          <MessageActions
+            markdown={markdown}
+            filename={`краткое-содержание-${notebookId}`}
+            onSaveNote={
+              onSaveNote ? () => onSaveNote(content, citations) : undefined
+            }
+          />
+        </div>
+      )}
+
+      {/* Starter questions for a fresh notebook: the overview is the
+          only content, so it doubles as the seed for follow-ups. */}
+      {content.length > 0 && onAsk && (
+        <SuggestionsChips
+          notebookId={notebookId}
+          question="обзор источников ноутбука"
+          answer={content}
+          onPick={onAsk}
+        />
+      )}
     </div>
   );
 }

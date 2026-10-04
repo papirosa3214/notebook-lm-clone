@@ -12,11 +12,20 @@ import { Dot } from './Dot';
 import { SummaryCard } from './SummaryCard';
 import { CitationChip } from './CitationChip';
 import { SuggestionsChips } from './SuggestionsChips';
+import { MessageActions } from './MessageActions';
+import {
+  answerAsMarkdown,
+  conversationAsMarkdown,
+  downloadText,
+  slugifyFilename,
+} from '../lib/download';
 import {
   SendIcon,
   StopIcon,
   SparkleIcon,
   ChevronDownIcon,
+  DownloadIcon,
+  PlusIcon,
 } from './icons/NotebookLogo';
 
 interface Props {
@@ -74,6 +83,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
         role: m.role as 'user' | 'assistant',
         content: m.content,
         citations: m.citations ?? undefined,
+        createdAt: m.createdAt,
       })),
     );
   }, [history.data?.messages.length, notebookId]);
@@ -90,6 +100,15 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   const hasUncitedNoSourceAnswer = useMemo(
     () => containsUncitedNoSourceAnswer(messages, readyCount),
     [messages, readyCount],
+  );
+
+  /** Finished turns only — the header actions operate on real content. */
+  const doneMessages = useMemo(
+    () =>
+      messages
+        .filter((m) => !m.pending && !m.error && m.content.trim().length > 0)
+        .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt })),
+    [messages],
   );
 
   const [provider, setProvider] = useState('ollama');
@@ -120,7 +139,12 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     const userMsg: ChatMessage = { role: 'user', content: text };
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', pending: true };
+    const assistantMsg: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      pending: true,
+      createdAt: new Date().toISOString(),
+    };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
 
@@ -262,6 +286,44 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
           )}
         </div>
         <div className="flex items-center gap-1.5 text-xs">
+          {/* Whole-conversation actions. Per-answer copy/download/note
+              live under each answer; these cover "выгрузить весь
+              разговор" and "сделать заметку из разговора". */}
+          {doneMessages.length > 0 && (
+            <div className="mr-1 flex items-center gap-0.5" data-testid="conversation-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadText(
+                    `разговор-${slugifyFilename(notebookId)}.md`,
+                    conversationAsMarkdown('Разговор', doneMessages),
+                  )
+                }
+                className="rounded-full p-1.5 text-muted transition-colors hover:bg-surface-tint hover:text-ink"
+                title="Скачать весь разговор как Markdown"
+                aria-label="Скачать весь разговор"
+                data-testid="conversation-download"
+              >
+                <DownloadIcon size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void onSaveArtifact(
+                    'Разговор',
+                    conversationAsMarkdown('Разговор', doneMessages),
+                    [],
+                  )
+                }
+                className="rounded-full p-1.5 text-muted transition-colors hover:bg-surface-tint hover:text-ink"
+                title="Сохранить весь разговор в заметки"
+                aria-label="Сохранить разговор в заметки"
+                data-testid="conversation-save-note"
+              >
+                <PlusIcon size={13} />
+              </button>
+            </div>
+          )}
           <select
             className="cursor-pointer rounded-full border bg-surface-tint py-1 pl-3 pr-7 text-xs font-medium text-ink transition-colors hover:bg-surface"
             style={{ borderColor: 'rgb(var(--nb-border))' }}
@@ -314,6 +376,10 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             notebookId={notebookId}
             readyCount={readyCount}
             onOpenCitation={onOpenCitation}
+            onSaveNote={(content, citations) => {
+              void onSaveArtifact('Краткое содержание', content, citations);
+            }}
+            onAsk={setInput}
           />
         )}
         {messages.length === 0 && (
@@ -524,15 +590,18 @@ function MessageBubble({
           </div>
         )}
         {message.content && !message.pending && (
-          <button
-            className="btn btn-ghost text-xs"
-            onClick={() => {
-              void onSaveArtifact(prevUser?.content ?? '?', message.content, message.citations ?? []);
+          <MessageActions
+            createdAt={message.createdAt}
+            markdown={answerAsMarkdown(prevUser?.content, message.content, message.citations)}
+            filename={`ответ-${slugifyFilename(prevUser?.content ?? 'notebook')}`}
+            onSaveNote={() => {
+              void onSaveArtifact(
+                prevUser?.content ?? '?',
+                message.content,
+                message.citations ?? [],
+              );
             }}
-            title="Сохранить как заметку"
-          >
-            Сохранить в заметки
-          </button>
+          />
         )}
         {message.content && !message.pending && !message.error && prevUser && (
           <SuggestionsChips

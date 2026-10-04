@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
 import { useSwipe } from '../lib/useSwipe';
+import { answerAsMarkdown, conversationAsMarkdown, downloadText, slugifyFilename } from '../lib/download';
 import { SourcesPanel } from '../components/SourcesPanel';
 import { SourceDetailSheet } from '../components/SourceDetailSheet';
 import { SourceScopeProvider } from '../lib/sourceScopeContext';
@@ -35,17 +36,9 @@ function buildArtifactMarkdown(
   answer: string,
   citations: CitationChunk[],
 ): { title: string; contentMd: string } {
-  const title = question.length > 80 ? question.slice(0, 77) + '…' : question;
-  const lines = [`# ${title}`, '', '## Ответ', '', answer.trim(), ''];
-  if (citations.length > 0) {
-    lines.push('## Источники', '');
-    citations.forEach((c, i) => {
-      lines.push(`**[${i + 1}]** ${c.sourceTitle}`);
-      const snippet = c.text.length > 400 ? c.text.slice(0, 400) + '…' : c.text;
-      lines.push('', snippet, '');
-    });
-  }
-  return { title, contentMd: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n' };
+  // One shared builder so an answer saved as a note is byte-identical
+  // to the one produced by the chat's copy / download actions.
+  return { title: question, contentMd: answerAsMarkdown(question, answer, citations) };
 }
 
 type MobileTab = 'sources' | 'overview' | 'chat' | 'artifacts';

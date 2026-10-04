@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SummaryCard } from './SummaryCard';
 import { __resetSummaryStore } from '../lib/summaryStore';
 
@@ -60,6 +60,54 @@ describe('SummaryCard', () => {
     render(<SummaryCard notebookId="nb3" readyCount={2} />);
     expect(screen.getByText('Старый обзор')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('stamps when the overview was generated', async () => {
+    localStorage.setItem(
+      'nb.summary.nb5',
+      JSON.stringify({ content: 'Обзор', citations: [], savedAt: '2026-10-04T09:30:00.000Z' }),
+    );
+    render(<SummaryCard notebookId="nb5" readyCount={1} />);
+    // Full date *and* time, not just "1 источник" — the user asked when
+    // it was said. The clock value is rendered in the local zone, so we
+    // assert the shape rather than a specific hour.
+    const meta = screen.getByText(/2026/);
+    expect(meta.textContent).toMatch(/\d{1,2}:\d{2}/);
+  });
+
+  it('offers copy / download / save-as-note on the overview', () => {
+    localStorage.setItem(
+      'nb.summary.nb6',
+      JSON.stringify({ content: 'Обзор', citations: [], savedAt: '2026-10-04T09:30:00.000Z' }),
+    );
+    const onSaveNote = vi.fn();
+    render(<SummaryCard notebookId="nb6" readyCount={1} onSaveNote={onSaveNote} />);
+
+    expect(screen.getByTestId('action-copy')).toBeInTheDocument();
+    expect(screen.getByTestId('action-download')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('action-save-note'));
+    expect(onSaveNote).toHaveBeenCalledWith('Обзор', []);
+  });
+
+  it('suggests starter questions once the overview exists', async () => {
+    localStorage.setItem(
+      'nb.summary.nb7',
+      JSON.stringify({ content: 'Обзор протоколов', citations: [], savedAt: '2026-10-04T09:30:00.000Z' }),
+    );
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          `data: ${JSON.stringify({ type: 'suggestions', suggestions: ['Что такое A2A?'] })}\n\n`,
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        ),
+      ),
+    );
+    const onAsk = vi.fn();
+    render(<SummaryCard notebookId="nb7" readyCount={1} onAsk={onAsk} />);
+
+    await waitFor(() => expect(screen.getByTestId('suggestions-chips')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByTestId('suggestion-chip')[0]!);
+    expect(onAsk).toHaveBeenCalledWith('Что такое A2A?');
   });
 
   it('renders a stream error instead of spinning forever', async () => {
