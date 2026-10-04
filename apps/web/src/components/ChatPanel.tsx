@@ -524,17 +524,10 @@ function MessageBubble({
     );
   }
   return (
-    <div className="flex animate-fade-up items-start gap-3">
-      <div
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl"
-        style={{
-          background:
-            'linear-gradient(135deg, rgb(var(--nb-ai)) 0%, rgb(46 38 117) 100%)',
-        }}
-      >
-        <SparkleIcon size={14} className="text-white" />
-      </div>
-      <div className="min-w-0 max-w-[88%] flex-1 space-y-2">
+    // The model's reply is plain text in the column — no avatar chip,
+    // no frame, no background. Only the human's message has a tint.
+    <div className="animate-fade-up">
+      <div className="min-w-0 space-y-2">
         {/* Flat: the column already delimits the reply from the user's
             question above. A frame here would just nest another box
             inside the chat window. */}
