@@ -34,6 +34,17 @@ export function getRawSqlite(): Database.Database {
   return _sqlite!;
 }
 
+/**
+ * Run the migration set against an arbitrary database handle.
+ *
+ * Exported for the migration regression tests, which build a database
+ * with an older schema by hand and then assert `migrate()` upgrades it.
+ * Production code goes through `getDb()`.
+ */
+export function migrateForTests(sqlite: Database.Database): void {
+  migrate(sqlite);
+}
+
 function migrate(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS notebooks (
@@ -205,11 +216,81 @@ function migrate(sqlite: Database.Database) {
   );
   addColumnIfMissing(sqlite, 'artifacts', 'meta', 'TEXT');
 
+  // SQLite cannot ALTER a CHECK constraint. A database created by an
+  // earlier build has `kind IN ('note','audio_overview')` baked into
+  // the table definition, and `addColumnIfMissing` is a no-op there
+  // because the column already exists — so every `kind='report'`
+  // insert (Studio reports, Deep Research) fails with "CHECK
+  // constraint failed". Rebuild the table when we detect the stale
+  // two-value constraint.
+  rebuildArtifactsIfKindConstraintStale(sqlite);
+
   // Sharing (Milestone D). Both columns are nullable; revoking a
   // share sets shareToken = NULL while keeping shareEnabledAt as
   // the timestamp of the last enable.
   addColumnIfMissing(sqlite, 'notebooks', 'share_token', 'TEXT');
   addColumnIfMissing(sqlite, 'notebooks', 'share_enabled_at', 'TEXT');
+}
+
+/**
+ * Rebuild the `artifacts` table when its CHECK constraint predates the
+ * `'report'` kind. Forward-only and idempotent: after the rebuild the
+ * constraint contains `'report'`, so the guard stops firing.
+ *
+ * The rebuild follows the documented SQLite recipe (create new table →
+ * copy → drop old → rename → recreate indexes). It runs inside the
+ * caller's transaction, so a crash mid-way leaves the old table intact.
+ */
+function rebuildArtifactsIfKindConstraintStale(sqlite: Database.Database): void {
+  const row = sqlite
+    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='artifacts'`)
+    .get() as { sql: string } | undefined;
+  if (!row) return;
+  const sql = row.sql ?? '';
+  // Only rebuild when the table defines a kind CHECK that omits 'report'.
+  const hasKindCheck = /CHECK\s*\(\s*kind\s+IN\s*\(/i.test(sql);
+  if (!hasKindCheck) return;
+  if (/['"]report['"]/.test(sql)) return; // already current
+
+  // The canonical SQLite table-rebuild recipe: FKs off (the pragma is
+  // a no-op inside a transaction, so it must come first), swap inside
+  // a transaction, then FKs back on. `artifacts` is a child table
+  // (it references notebooks) and nothing references it, so the drop
+  // cannot orphan rows.
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.exec('BEGIN');
+    sqlite.exec(`
+      CREATE TABLE artifacts__new (
+        id TEXT PRIMARY KEY,
+        notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        content_md TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        kind TEXT NOT NULL DEFAULT 'note'
+          CHECK (kind IN ('note', 'audio_overview', 'report')),
+        meta TEXT
+      );
+      INSERT INTO artifacts__new
+        (id, notebook_id, title, content_md, created_at, updated_at, kind, meta)
+        SELECT id, notebook_id, title, content_md, created_at, updated_at, kind, meta
+        FROM artifacts;
+      DROP TABLE artifacts;
+      ALTER TABLE artifacts__new RENAME TO artifacts;
+      CREATE INDEX IF NOT EXISTS idx_artifacts_notebook ON artifacts(notebook_id);
+    `);
+    sqlite.exec('COMMIT');
+  } catch (err) {
+    try {
+      sqlite.exec('ROLLBACK');
+    } catch {
+      // Rollback itself can fail if the transaction never opened.
+    }
+    throw err;
+  } finally {
+    sqlite.pragma('foreign_keys = ON');
+  }
 }
 
 function addColumnIfMissing(
