@@ -19,7 +19,6 @@ import {
   SendIcon,
   CloseIcon,
   TrashIcon,
-  ChevronDownIcon,
 } from './icons/NotebookLogo';
 
 interface Props {
@@ -159,7 +158,7 @@ export function SourcesPanel({ notebookId }: Props) {
           </div>
         )}
         {sources.data && sources.data.sources.length === 0 && (
-          <EmptyState onDiscover={() => setShowAddSearch(true)} />
+          <EmptyState />
         )}
         <ul className="space-y-2">
           {sources.data?.sources.map((s) => (
@@ -314,7 +313,7 @@ function AddSourceBar({
         <SearchIcon size={14} className="shrink-0 text-muted" />
         <input
           className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-ink outline-none placeholder:text-muted"
-          placeholder="Вставьте ссылку или введите запрос…"
+          placeholder="Ссылка или запрос…"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           data-testid="add-source-input"
@@ -342,14 +341,19 @@ function AddSourceBar({
         </button>
       </div>
       <p className="mt-1.5 px-1 text-[10px] leading-snug text-muted">
-        Ссылка на страницу или YouTube — добавим как источник. Обычный текст —
-        поищем в вебе.
+        Ссылка → источник. Текст → поиск в вебе.
       </p>
     </form>
   );
 }
 
-function EmptyState({ onDiscover }: { onDiscover: () => void }) {
+/**
+ * Shown while the notebook has no sources. Purely explanatory: the
+ * add-source field sits directly above it, so a second "Discover"
+ * button here would be a duplicate entry point into the same search
+ * flow.
+ */
+function EmptyState() {
   return (
     <div className="empty-card mt-2">
       <span className="text-3xl" aria-hidden>
@@ -357,12 +361,9 @@ function EmptyState({ onDiscover }: { onDiscover: () => void }) {
       </span>
       <p className="text-sm font-medium">Пока нет источников</p>
       <p className="max-w-xs text-xs text-muted">
-        Добавьте URL, YouTube-видео или файл. Или попросите Notebook найти источники по теме.
+        Вставьте ссылку в поле выше — добавим страницу или видео как
+        источник. Или напишите тему — поищем в вебе.
       </p>
-      <button className="btn btn-primary mt-2 text-xs" onClick={onDiscover}>
-        <SearchIcon size={12} />
-        Discover
-      </button>
     </div>
   );
 }
