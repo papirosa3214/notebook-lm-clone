@@ -75,7 +75,15 @@ function renderPage(path = '/notebooks/nb1') {
   );
 }
 
-beforeEach(stubMatchMedia);
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width });
+}
+
+beforeEach(() => {
+  stubMatchMedia();
+  // Layout is persisted; a fresh page must not inherit another test's.
+  localStorage.clear();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -116,6 +124,25 @@ describe('NotebookPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Не удалось загрузить ноутбук')).toBeInTheDocument(),
     );
+  });
+
+  it('opens the notes panel when the viewport has room for it', async () => {
+    setViewportWidth(1500);
+    mockApi();
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('notebook-center')).toBeInTheDocument());
+    expect(screen.getByTestId('notes-panel')).toBeInTheDocument();
+  });
+
+  it('keeps the notes panel collapsed on a narrow viewport so the chat gets the width', async () => {
+    // Two open side panels (300 + 340 px) leave a phone-width strip for
+    // the chat at this size, which is what made the desktop layout read
+    // as the mobile one.
+    setViewportWidth(1100);
+    mockApi();
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('notebook-center')).toBeInTheDocument());
+    expect(screen.queryByTestId('notes-panel')).toBeNull();
   });
 
   it('exposes the Deep Research entry point in the header', async () => {

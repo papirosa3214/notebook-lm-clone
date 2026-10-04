@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
@@ -76,13 +76,35 @@ const DEFAULT_LAYOUT: LayoutState = {
 // existing installation picks up the new default once instead of
 // keeping a stale `notesCollapsed: true` from the old layout blob.
 const LAYOUT_KEY = 'nb.layout.v2';
+
+/**
+ * Below this viewport width the two side panels (300 + 340 px plus
+ * resizers) squeeze the chat into a phone-width column — the layout
+ * still renders its desktop markup, it just has no room, which reads
+ * as "mobile version on a desktop". The notes panel therefore opens
+ * only when there is space for it, and closes again if the window
+ * shrinks. A manual toggle always wins over this heuristic.
+ */
+const NOTES_AUTO_OPEN_MIN_WIDTH = 1280;
+
+/** Set once the user toggles the notes panel themselves, so the
+ *  viewport heuristic stops overriding their choice on later loads. */
+const NOTES_MANUAL_KEY = 'nb.layout.notesManual';
+
+function defaultNotesCollapsed(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.innerWidth < NOTES_AUTO_OPEN_MIN_WIDTH;
+}
 const MIN_PANEL = 200;
 const MAX_PANEL = 600;
 
 function loadLayout(): LayoutState {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return DEFAULT_LAYOUT;
+    // No stored blob yet (first visit, or the v2 key bump): decide the
+    // notes panel from the viewport instead of unconditionally opening
+    // it into a window that cannot fit it.
+    if (!raw) return { ...DEFAULT_LAYOUT, notesCollapsed: defaultNotesCollapsed() };
     const parsed = JSON.parse(raw) as Partial<LayoutState>;
     return {
       sourcesWidth: clamp(
@@ -116,6 +138,19 @@ export default function NotebookPage() {
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
   const [paletteOpen, openPalette, closePalette] = useCommandPaletteHotkey();
 
+  // Tracks whether notesCollapsed is still being decided for the user.
+  // Once they toggle the panel themselves we stop second-guessing them,
+  // including across reloads (hence the persisted flag).
+  const autoNotesRef = useRef(
+    (() => {
+      try {
+        return localStorage.getItem(NOTES_MANUAL_KEY) !== '1';
+      } catch {
+        return true;
+      }
+    })(),
+  );
+
   const updateLayout = useCallback((patch: Partial<LayoutState>) => {
     setLayout((prev) => {
       const next = { ...prev, ...patch };
@@ -126,6 +161,36 @@ export default function NotebookPage() {
       }
       return next;
     });
+  }, []);
+
+  // The user asked for the notes panel explicitly — stop auto-toggling.
+  const setNotesCollapsed = useCallback(
+    (collapsed: boolean) => {
+      autoNotesRef.current = false;
+      try {
+        localStorage.setItem(NOTES_MANUAL_KEY, '1');
+      } catch {
+        /* quota — ignore */
+      }
+      updateLayout({ notesCollapsed: collapsed });
+    },
+    [updateLayout],
+  );
+
+  // Open the notes panel only while there is room for it. Without this
+  // a window around 1100 px wide renders 300 + 340 px of side panels
+  // and leaves the chat a phone-width strip.
+  useEffect(() => {
+    function syncToViewport() {
+      if (!autoNotesRef.current) return;
+      const shouldCollapse = window.innerWidth < NOTES_AUTO_OPEN_MIN_WIDTH;
+      setLayout((prev) =>
+        prev.notesCollapsed === shouldCollapse ? prev : { ...prev, notesCollapsed: shouldCollapse },
+      );
+    }
+    syncToViewport();
+    window.addEventListener('resize', syncToViewport);
+    return () => window.removeEventListener('resize', syncToViewport);
   }, []);
   const commands: CommandDef[] = [
     {
@@ -161,7 +226,7 @@ export default function NotebookPage() {
       label: '📝 Скрыть заметки',
       hint: 'правая панель',
       keywords: ['collapse', 'notes', 'panel', 'скрыть'],
-      run: () => updateLayout?.({ notesCollapsed: true }),
+      run: () => setNotesCollapsed(true),
     },
   ];
   const notebook = useQuery({
@@ -544,7 +609,7 @@ export default function NotebookPage() {
             <ResizableDivider
               side="right"
               collapsed={layout.notesCollapsed}
-              onToggleCollapse={() => updateLayout({ notesCollapsed: true })}
+              onToggleCollapse={() => setNotesCollapsed(true)}
               onResize={onResizeRight}
             />
           )}
@@ -554,7 +619,7 @@ export default function NotebookPage() {
         {layout.notesCollapsed ? (
           <CollapsedRail
             side="right"
-            onExpand={() => updateLayout({ notesCollapsed: false })}
+            onExpand={() => setNotesCollapsed(false)}
             label="Заметки"
             icon={<PanelRightIcon size={16} />}
           />
@@ -562,6 +627,7 @@ export default function NotebookPage() {
           <aside
             className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
             style={{ width: layout.notesWidth, borderLeft: '1px solid rgb(var(--nb-border))' }}
+            data-testid="notes-panel"
           >
             <ArtifactsPanel
               notebookId={notebookId}
