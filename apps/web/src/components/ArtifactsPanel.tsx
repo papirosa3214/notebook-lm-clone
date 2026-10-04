@@ -398,11 +398,15 @@ function durationFromMeta(metaStr: string | null | undefined): string | null {
 }
 
 /** Quick parse of the SCRIPT/MIRA/STAGE line count from the markdown
- *  body — we only need it for the meta hint, so a regex is enough. */
-function lineCountFromContent(contentMd: string): number {
-  const matches = contentMd.match(/^\s*(?:[*_`-]?\s*)?(?:SCRIPT|MIRA|STAGE)\s*[:]/gim);
+ *  body — we only need it for the meta hint, so a regex is enough.
+ *  Matches the speaker prefix at the start of a line, with optional
+ *  leading markdown emphasis (`**`, `*`, `_`). Case-insensitive. */
+export function lineCountFromContent(contentMd: string): number {
+  const matches = contentMd.match(/(?:^|\n)\s*(?:\*+\s*|_\s*)?(?:SCRIPT|MIRA|STAGE)\s*:/gi);
   return matches?.length ?? 0;
 }
+
+export { parseAudioFilename, parseStatus, styleFromMeta, durationFromMeta };
 
 /** Discriminator for the structured Studio renderers. We check
  *  `meta.template` first (cheap, no JSON parse of the body) and
