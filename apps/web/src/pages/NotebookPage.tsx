@@ -359,16 +359,10 @@ export default function NotebookPage() {
             <SparkleIcon size={12} className="text-accent" />
             <span>Studio</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setShowDeepResearchDialog(true)}
-            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
-            title="Deep Research: агент сам найдёт источники в вебе и напишет отчёт"
-            data-testid="open-deep-research"
-          >
-            <SparkleIcon size={12} className="text-accent" />
-            <span>Deep Research</span>
-          </button>
+          {/* Кнопка «Deep Research» убрана из шапки: единый визуальный
+              вход теперь — вкладка в SourcesCockpit (Sources Panel).
+              Command Palette (Cmd+K → Deep Research) по-прежнему
+              открывает диалог через setShowDeepResearchDialog ниже. */}
           <button
             type="button"
             onClick={() => setShowShareDialog(true)}

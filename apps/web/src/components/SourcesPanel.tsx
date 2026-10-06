@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { SourcesCockpit } from './SourcesCockpit';
 import type {
   IngestProgressDelta,
   IngestStage,
@@ -67,14 +68,8 @@ export function SourcesPanel({ notebookId }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sources', notebookId] }),
   });
 
-  const [showAddUrl, setShowAddUrl] = useState(false);
-  const [showAddYt, setShowAddYt] = useState(false);
   const [showAddFile, setShowAddFile] = useState(false);
-  const [showAddSearch, setShowAddSearch] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
-  /** Text typed into the add-source bar, handed to whichever dialog the
-   *  bar routed to so the user doesn't retype it. */
-  const [pendingValue, setPendingValue] = useState('');
 
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
@@ -128,25 +123,24 @@ export function SourcesPanel({ notebookId }: Props) {
         </div>
       </div>
 
-      {/* Add source — a single entry point. Paste a URL or type a query;
-          the bar routes to the right dialog, which is where the details
-          (title, ASR toggle, which hits to ingest) get chosen. */}
-      <AddSourceBar
-        onSubmit={(value) => {
-          const kind = classifySourceInput(value);
-          if (kind === 'youtube') {
-            setPendingValue(value);
-            setShowAddYt(true);
-          } else if (kind === 'url') {
-            setPendingValue(normalizeUrlInput(value));
-            setShowAddUrl(true);
-          } else {
-            setPendingValue(value);
-            setShowAddSearch(true);
-          }
-        }}
-        onPickFile={() => setShowAddFile(true)}
+      {/* Sources Cockpit — единый пульт «сырья» с 4 вкладками.
+          Заменяет AddSourceBar + 3 модалки (URL/YouTube/Search).
+          AddFileDialog остаётся отдельной модалкой ниже — системный
+          file picker нормально работает только оттуда. */}
+      <SourcesCockpit
+        notebookId={notebookId}
+        onSourceAdded={() => qc.invalidateQueries({ queryKey: ['sources', notebookId] })}
       />
+      <div className="px-4 pb-2">
+        <button
+          type="button"
+          onClick={() => setShowAddFile(true)}
+          className="btn btn-secondary w-full text-xs"
+          data-testid="open-add-file"
+        >
+          📄 Загрузить файл
+        </button>
+      </div>
 
       {/* Sources list */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -182,37 +176,9 @@ export function SourcesPanel({ notebookId }: Props) {
         </ul>
       </div>
 
-      {showAddUrl && (
-        <AddUrlDialog
-          notebookId={notebookId}
-          initialValue={pendingValue}
-          onClose={() => {
-            setShowAddUrl(false);
-            setPendingValue('');
-          }}
-        />
-      )}
-      {showAddYt && (
-        <AddYoutubeDialog
-          notebookId={notebookId}
-          initialValue={pendingValue}
-          onClose={() => {
-            setShowAddYt(false);
-            setPendingValue('');
-          }}
-        />
-      )}
       {showAddFile && <AddFileDialog notebookId={notebookId} onClose={() => setShowAddFile(false)} />}
-      {showAddSearch && (
-        <DiscoverDialog
-          notebookId={notebookId}
-          initialQuery={pendingValue}
-          onClose={() => {
-            setShowAddSearch(false);
-            setPendingValue('');
-          }}
-        />
-      )}
+      {/* AddUrlDialog / AddYoutubeDialog / DiscoverDialog удалены:
+          их содержимое перенесено в SourcesCockpit. */}
       {pendingDelete && (
         <ConfirmDialog
           title="Удалить источник?"

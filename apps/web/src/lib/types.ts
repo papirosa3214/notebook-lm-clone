@@ -146,3 +146,21 @@ export interface ChatHistoryResponse {
   /** ISO created_at cursor for the next page. Null when there are no more pages. */
   nextBefore: string | null;
 }
+
+/** Hand-written mirror of `@notebook/shared` DeepResearchDelta.
+ *  Only the subset the SourcesCockpit reads from the SSE stream. */
+export type DeepResearchPhase =
+  | 'planning'
+  | 'searching'
+  | 'fetching'
+  | 'synthesizing'
+  | 'done'
+  | 'failed';
+
+export type DeepResearchDelta =
+  | { type: 'phase'; phase: DeepResearchPhase; message?: string; ratio?: number }
+  | { type: 'queries'; queries: string[] }
+  | { type: 'hit'; url: string; title: string; ingested: boolean; reason?: string }
+  | { type: 'token'; text: string }
+  | { type: 'done'; artifactId: string; sourceCount: number; citationCount: number }
+  | { type: 'error'; message: string };

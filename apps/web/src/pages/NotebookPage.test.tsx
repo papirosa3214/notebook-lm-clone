@@ -145,10 +145,10 @@ describe('NotebookPage', () => {
     expect(screen.queryByTestId('notes-panel')).toBeNull();
   });
 
-  it('exposes the Deep Research entry point in the header', async () => {
+  it('does NOT show the Deep Research button in the header (cockpit owns it)', async () => {
     mockApi();
     renderPage();
     await waitFor(() => expect(screen.getByTestId('notebook-center')).toBeInTheDocument());
-    expect(screen.getByTestId('open-deep-research')).toBeInTheDocument();
+    expect(screen.queryByTestId('open-deep-research')).toBeNull();
   });
 });
