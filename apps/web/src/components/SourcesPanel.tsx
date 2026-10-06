@@ -138,7 +138,7 @@ export function SourcesPanel({ notebookId }: Props) {
             setPendingValue(value);
             setShowAddYt(true);
           } else if (kind === 'url') {
-            setPendingValue(value);
+            setPendingValue(normalizeUrlInput(value));
             setShowAddUrl(true);
           } else {
             setPendingValue(value);
@@ -279,6 +279,18 @@ export function classifySourceInput(raw: string): SourceInputKind {
   // that is a search, not a URL.
   if (!host.includes('.')) return 'query';
   return 'url';
+}
+
+/**
+ * The classifier deliberately accepts a scheme-less domain ("habr.com/x")
+ * as a URL, but the ingest route validates with `z.string().url()`, which
+ * requires a scheme — a raw paste answers 400 {"url":["Invalid url"]}.
+ * Prepend https:// when the value has no scheme so a pasted link just works.
+ */
+export function normalizeUrlInput(raw: string): string {
+  const v = raw.trim();
+  if (!v) return v;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
 }
 
 /**
@@ -665,7 +677,7 @@ function AddUrlDialog({
     setProgress(INITIAL_PROGRESS);
     const stream = api.ingestUrlSourceStream(
       notebookId,
-      { url, title: title || undefined },
+      { url: normalizeUrlInput(url), title: title || undefined },
       (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
     );
     stream.promise

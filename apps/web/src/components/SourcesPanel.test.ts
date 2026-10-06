@@ -6,7 +6,7 @@
  * down.
  */
 import { describe, expect, it } from 'vitest';
-import { classifySourceInput } from './SourcesPanel';
+import { classifySourceInput, normalizeUrlInput } from './SourcesPanel';
 
 describe('classifySourceInput', () => {
   it('routes YouTube URLs (all the usual shapes) to the YouTube flow', () => {
@@ -40,5 +40,23 @@ describe('classifySourceInput', () => {
   it('treats an empty or whitespace-only value as a search', () => {
     expect(classifySourceInput('')).toBe('query');
     expect(classifySourceInput('   ')).toBe('query');
+  });
+});
+
+describe('normalizeUrlInput', () => {
+  it('prepends https:// so a scheme-less paste passes the API url() check', () => {
+    expect(normalizeUrlInput('habr.com/ru/articles/123')).toBe('https://habr.com/ru/articles/123');
+    expect(normalizeUrlInput('sub.example.org/path')).toBe('https://sub.example.org/path');
+    expect(normalizeUrlInput('  example.com  ')).toBe('https://example.com');
+  });
+
+  it('leaves an already-schemed URL untouched', () => {
+    expect(normalizeUrlInput('https://example.com/article')).toBe('https://example.com/article');
+    expect(normalizeUrlInput('http://localhost:3000/x')).toBe('http://localhost:3000/x');
+  });
+
+  it('returns an empty string for empty input', () => {
+    expect(normalizeUrlInput('')).toBe('');
+    expect(normalizeUrlInput('   ')).toBe('');
   });
 });
