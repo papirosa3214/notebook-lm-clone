@@ -7,7 +7,7 @@ import {
   scopeToSourceIds,
   useSourceScopeContext,
 } from '../lib/sourceScopeContext';
-import type { ChatMessage, CitationChunk } from '../lib/types';
+import type { ChatMessage, CitationChunk, ProviderId } from '../lib/types';
 import { Dot } from './Dot';
 import { SummaryCard } from './SummaryCard';
 import { CitationChip } from './CitationChip';
@@ -32,6 +32,39 @@ interface Props {
   notebookId: string;
   onSaveArtifact: (question: string, answer: string, citations: CitationChunk[]) => void;
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
+}
+
+/** Display names for the provider ids the API hands us. A backend we don't
+ *  know about falls back to its raw id, so the picker never breaks. */
+const PROVIDER_LABELS: Record<string, string> = {
+  ollama: 'Ollama',
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  minimax: 'MiniMax',
+};
+
+/**
+ * Per-notebook memory of the backend the user actually picked. Without it,
+ * every re-open re-applies the notebook's stored default (usually ollama /
+ * qwen), which reads as "my MiniMax choice didn't take".
+ */
+const providerStorageKey = (notebookId: string) => `chat-provider:${notebookId}`;
+const modelStorageKey = (notebookId: string) => `chat-model:${notebookId}`;
+
+function readSaved(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSaved(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode / quota — the pick just won't survive a reload */
+  }
 }
 
 export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props) {
@@ -116,15 +149,58 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     [messages],
   );
 
-  const [provider, setProvider] = useState('ollama');
-  const [model, setModel] = useState('qwen3.6-27b-iq4-16k:latest');
+  const [provider, setProvider] = useState('minimax');
+  const [model, setModel] = useState('MiniMax-M3');
+
+  // Provider catalogue comes from the API, so registering a backend
+  // server-side is enough for it to appear here — no JSX list to keep in
+  // sync, and the model list follows whichever provider is selected.
+  const providersQuery = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => api.listProviders(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const providerList = providersQuery.data?.providers ?? [];
+  // Until it loads — or if it fails — keep the current provider selectable
+  // so the strip is never an empty, unusable control.
+  const providerIds: ProviderId[] = providerList.length
+    ? providerList.map((p) => p.id)
+    : provider
+      ? [provider as ProviderId]
+      : [];
+  const modelOptions = providerList.find((p) => p.id === provider)?.models ?? [];
+
+  /**
+   * Switching the backend has to move the model with it. Leaving the old
+   * provider's model in place sent e.g. "qwen3.6-27b-iq4-16k" to MiniMax,
+   * and the user had to retype the model name by hand.
+   */
+  function changeProvider(next: string) {
+    setProvider(next);
+    writeSaved(providerStorageKey(notebookId), next);
+    const def = providerList.find((p) => p.id === next)?.defaultModel;
+    if (def) {
+      setModel(def);
+      writeSaved(modelStorageKey(notebookId), def);
+    }
+  }
+
+  /** Remember a hand-typed model name so it survives a reload too. */
+  function changeModel(next: string) {
+    setModel(next);
+    writeSaved(modelStorageKey(notebookId), next);
+  }
 
   useEffect(() => {
-    if (notebook.data) {
-      setProvider(notebook.data.defaultProvider);
-      setModel(notebook.data.defaultModel);
-    }
-  }, [notebook.data?.id, notebook.data?.defaultProvider, notebook.data?.defaultModel]);
+    if (!notebook.data) return;
+    // What the user picked outranks the notebook's stored default. The old
+    // behaviour re-applied ollama/qwen on every open, so a MiniMax selection
+    // silently reverted the moment the notebook was reopened.
+    const savedProvider = readSaved(providerStorageKey(notebookId));
+    const savedModel = readSaved(modelStorageKey(notebookId));
+    setProvider(savedProvider ?? notebook.data.defaultProvider);
+    setModel(savedModel ?? notebook.data.defaultModel);
+  }, [notebookId, notebook.data?.id, notebook.data?.defaultProvider, notebook.data?.defaultModel]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -230,13 +306,13 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     send(userMsg.content);
   }
 
-  // Cycle the LLM provider ollama→anthropic→openai→ollama so the user can
-  // hop to a different backend after a failure without leaving the page.
+  // Hop to the next backend after a failure without leaving the page.
+  // The order is the server's registry order, not a second hardcoded list.
   function cycleProvider() {
-    const order: Array<'ollama' | 'anthropic' | 'openai'> = ['ollama', 'anthropic', 'openai'];
-    const cur = provider as (typeof order)[number];
-    const next = order[(order.indexOf(cur) + 1) % order.length]!;
-    setProvider(next);
+    if (providerIds.length === 0) return;
+    const cur = providerIds.indexOf(provider as ProviderId);
+    const next = providerIds[(cur + 1) % providerIds.length]!;
+    changeProvider(next);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -332,20 +408,32 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
             className="cursor-pointer rounded-full border bg-surface-tint py-1 pl-3 pr-7 text-xs font-medium text-ink transition-colors hover:bg-surface"
             style={{ borderColor: 'rgb(var(--nb-border))' }}
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            onChange={(e) => changeProvider(e.target.value)}
+            data-testid="chat-provider"
           >
-            <option value="ollama">Ollama</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
+            {providerIds.map((id) => (
+              <option key={id} value={id}>
+                {PROVIDER_LABELS[id] ?? id}
+              </option>
+            ))}
           </select>
+          {/* Free text plus a datalist of the selected provider's own models:
+              picking one is a click, but an unlisted name can still be typed. */}
           <input
             className="w-44 rounded-full border bg-surface-tint py-1 px-3 text-xs transition-colors hover:bg-surface focus:bg-surface"
             style={{ borderColor: 'rgb(var(--nb-border))' }}
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => changeModel(e.target.value)}
             placeholder="модель"
             title={model}
+            list="chat-model-options"
+            data-testid="chat-model"
           />
+          <datalist id="chat-model-options">
+            {modelOptions.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
         </div>
       </div>
 
@@ -425,6 +513,8 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
               onOpenCitation={onOpenCitation}
               onRetry={retryLastUserMessage}
               onCycleProvider={cycleProvider}
+              provider={provider}
+              model={model}
             />
           );
         })}
@@ -503,6 +593,8 @@ function MessageBubble({
   onOpenCitation,
   onRetry,
   onCycleProvider,
+  provider,
+  model,
 }: {
   message: ChatMessage;
   notebookId: string;
@@ -515,6 +607,11 @@ function MessageBubble({
   onOpenCitation?: (chunk: CitationChunk, index: number) => void;
   onRetry?: () => void;
   onCycleProvider?: () => void;
+  /** The chat backend currently selected. Forwarded to the suggestions call
+   *  so follow-ups don't silently fall back to the notebook's stored default
+   *  — which is how they kept spinning up the local Ollama model. */
+  provider?: string;
+  model?: string;
 }) {
   if (message.role === 'user') {
     return (
@@ -610,6 +707,8 @@ function MessageBubble({
             notebookId={notebookId}
             question={prevUser.content}
             answer={message.content}
+            provider={provider}
+            model={model}
             onPick={onPick}
           />
         )}

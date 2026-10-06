@@ -5,7 +5,7 @@ import { z } from 'zod';
 export const SourceKindSchema = z.enum(['url', 'file', 'youtube']);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 
-export const ProviderIdSchema = z.enum(['anthropic', 'openai', 'ollama']);
+export const ProviderIdSchema = z.enum(['anthropic', 'openai', 'ollama', 'minimax']);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ChatRoleSchema = z.enum(['system', 'user', 'assistant']);

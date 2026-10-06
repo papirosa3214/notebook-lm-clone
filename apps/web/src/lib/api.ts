@@ -6,6 +6,7 @@ import type {
   IngestProgressDelta,
   Notebook,
   ProviderId,
+  ProviderInfo,
   SearchAddBatchResponse,
   SearchPreviewResponse,
   Source,
@@ -258,6 +259,9 @@ export const api = {
   exportUrl: (notebookId: string) => `/api/notebooks/${notebookId}/export.zip`,
 
   // providers
+  /** Full catalogue (every backend + its models) for the chat header's
+   *  provider/model pickers. */
+  listProviders: () => http<{ providers: ProviderInfo[] }>('/api/providers'),
   listProviderModels: (id: ProviderId) =>
     http<{ provider: ProviderId; default: string; models: string[] }>(`/api/providers/${id}/models`),
 

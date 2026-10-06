@@ -14,6 +14,12 @@ interface Props {
   /** Optional sourceIds to scope suggestions to the same sources
    *  the user picked in the chat source-scope selector. */
   sourceIds?: string[];
+  /** The chat backend the user actually selected. Without these the
+   *  endpoint falls back to the notebook's stored default — which is how
+   *  suggestions kept spinning up the local Ollama model no matter what
+   *  the user picked in the chat header. */
+  provider?: string;
+  model?: string;
   /** Click handler — usually fills the chat input. */
   onPick: (suggestion: string) => void;
   /** When provided, replaces the "Подождите..." label. */
@@ -33,6 +39,8 @@ export function SuggestionsChips({
   answer,
   history,
   sourceIds,
+  provider,
+  model,
   onPick,
   emptyState,
 }: Props) {
@@ -54,7 +62,7 @@ export function SuggestionsChips({
         const res = await fetch(`/api/notebooks/${notebookId}/suggestions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, answer, history, sourceIds }),
+          body: JSON.stringify({ question, answer, history, sourceIds, provider, model }),
           signal: controller.signal,
         });
         if (res.status === 503) {
@@ -107,7 +115,7 @@ export function SuggestionsChips({
     })();
 
     return () => controller.abort();
-  }, [notebookId, question, answer, history, sourceIds]);
+  }, [notebookId, question, answer, history, sourceIds, provider, model]);
 
   if (error || disabled) {
     // Silent hide on error or feature-disabled — the chat still works.

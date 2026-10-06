@@ -1,7 +1,15 @@
 // All types inferred from backend responses — kept hand-written to avoid an
 // extra dep on zod in the frontend bundle.
 
-export type ProviderId = 'anthropic' | 'openai' | 'ollama';
+export type ProviderId = 'anthropic' | 'openai' | 'ollama' | 'minimax';
+
+/** One registered backend plus the models it advertises — what the chat
+ *  header renders its provider/model pickers from. */
+export interface ProviderInfo {
+  id: ProviderId;
+  defaultModel: string;
+  models: string[];
+}
 export type SourceKind = 'url' | 'file' | 'youtube';
 export type SourceStatus = 'pending' | 'parsing' | 'ready' | 'failed';
 

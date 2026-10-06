@@ -7,7 +7,7 @@ import { notebooks, sources } from '../db/schema.js';
 
 const CreateBody = z.object({
   title: z.string().min(1).max(200),
-  defaultProvider: z.enum(['anthropic', 'openai', 'ollama']).optional(),
+  defaultProvider: z.enum(['anthropic', 'openai', 'ollama', 'minimax']).optional(),
   defaultModel: z.string().optional(),
 });
 
@@ -25,12 +25,11 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id,
         title,
-        // Local Ollama + qwen3.6-27b-iq4-16k by default — same model
-        // Mnemosyne uses (MNEMOSYNE_LLM_MODEL), so chat behaviour is
-        // consistent across apps. 110 has no outbound network and can't
-        // pull new models, so we stay with what's actually installed.
-        defaultProvider: defaultProvider ?? 'ollama',
-        defaultModel: defaultModel ?? 'qwen3.6-27b-iq4-16k:latest',
+        // По умолчанию — MiniMax-M3 через прокси https://api.minimax.io/anthropic.
+        // Ключ задаётся в env как MINIMAX_API_KEY. Если ключ не задан, провайдер
+        // бросит ошибку при первом чате — пользователь увидит её явно.
+        defaultProvider: defaultProvider ?? 'minimax',
+        defaultModel: defaultModel ?? 'MiniMax-M3',
       })
       .run();
 

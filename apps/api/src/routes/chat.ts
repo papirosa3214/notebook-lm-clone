@@ -7,11 +7,12 @@ import {
   formatContextForPrompt,
   isUnsupported,
   sanitizeCitations,
+  type ProviderId,
 } from '@notebook/shared/providers';
 import { getDb } from '../db/index.js';
 import { notebooks, messages, sources } from '../db/schema.js';
 import { retrieve, retrieveWithRerank, type RetrievalChunk } from '../vectordb/client.js';
-import { getProvider } from '../providers/index.js';
+import { getProvider, listProviders } from '../providers/index.js';
 
 /**
  * Validate the client-supplied source filter. Three outcomes:
@@ -61,9 +62,26 @@ export function mapChunk(c: RetrievalChunk): CitationChunk {
 }
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
+  // Full provider catalogue: every registered backend with the models it
+  // advertises. The chat header renders its pickers straight from this, so
+  // registering a provider in providers/index.ts is enough for it to show
+  // up in the UI — there is no JSX list to keep in sync.
+  app.get('/api/providers', async () => ({
+    providers: await Promise.all(
+      listProviders().map(async (id) => {
+        const provider = getProvider(id);
+        return {
+          id,
+          defaultModel: provider.defaultModel,
+          models: await provider.listModels(),
+        };
+      }),
+    ),
+  }));
+
   // list models per provider
   app.get('/api/providers/:id/models', async (req) => {
-    const { id } = req.params as { id: 'ollama' | 'anthropic' | 'openai' };
+    const { id } = req.params as { id: ProviderId };
     const provider = getProvider(id);
     const models = await provider.listModels();
     return { provider: id, default: provider.defaultModel, models };

@@ -12,6 +12,11 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OLLAMA_BASE_URL: z.string().url().default('http://192.168.1.110:11434'),
 
+  // MiniMax — Anthropic-совместимый прокси (см. ~/bin/claude-minimax).
+  // По умолчанию тот же URL, что использует Claude-Code-обёртка.
+  MINIMAX_API_KEY: z.string().optional(),
+  MINIMAX_BASE_URL: z.string().url().default('https://api.minimax.io/anthropic'),
+
   // Embeddings (Ollama, same host as chat LLM)
   EMBEDDING_BASE_URL: z.string().url().default('http://192.168.1.110:11434'),
   EMBEDDING_MODEL: z.string().default('bge-m3-embed'),

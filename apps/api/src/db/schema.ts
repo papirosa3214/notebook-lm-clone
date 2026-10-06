@@ -6,12 +6,13 @@ const isoNow = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 export const notebooks = sqliteTable('notebooks', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
-  // Default to local Ollama — qwen3.6-27b-iq4-16k is the 27B model
-  // currently installed on the inference box. Same model Mnemosyne uses
-  // (MNEMOSYNE_LLM_MODEL), so behaviour stays consistent across apps.
-  // KV cache is Q4 and num_ctx is capped at 16384 in providers/ollama.ts.
-  defaultProvider: text('default_provider').notNull().default('ollama'),
-  defaultModel: text('default_model').notNull().default('qwen3.6-27b-iq4-16k:latest'),
+  // По умолчанию — MiniMax через прокси api.minimax.io/anthropic, модель M3.
+  // Для старых БД default в самой SQLite-схеме останется прежним, пока кто-то
+  // не выполнит ALTER TABLE. Runtime default при создании ноутбука подставляется
+  // явно в routes/notebooks.ts — этот default здесь для Drizzle-INSERT-ов без
+  // явного указания и для новых таблиц при первой миграции.
+  defaultProvider: text('default_provider').notNull().default('minimax'),
+  defaultModel: text('default_model').notNull().default('MiniMax-M3'),
   createdAt: text('created_at').notNull().default(isoNow),
   // Sharing (Milestone D). shareToken is a long random nanoid;
   // shareEnabledAt is the ISO timestamp of the last enable. Revoke
