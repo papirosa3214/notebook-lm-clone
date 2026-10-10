@@ -312,7 +312,7 @@ export default function NotebookPage() {
 
   return (
     <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
-      <div className="flex h-screen flex-col">
+      <div className="flex h-screen flex-col bg-canvas">
       {/* ---- Top header ---- */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 min-[640px]:px-6 pt-safe pl-safe pr-safe"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
@@ -499,7 +499,7 @@ export default function NotebookPage() {
         ) : (
           <aside
             className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
-            style={{ width: layout.sourcesWidth, borderRight: '1px solid rgb(var(--nb-border))' }}
+            style={{ width: layout.sourcesWidth }}
           >
             <SourcesPanel notebookId={notebookId} />
           </aside>
@@ -520,7 +520,7 @@ export default function NotebookPage() {
         {/* CENTER */}
         <main
           ref={swipeRef}
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas"
           data-testid="notebook-center"
         >
           {/* Mobile-only tabs. These keep the page padding because they
@@ -608,7 +608,7 @@ export default function NotebookPage() {
         ) : (
           <aside
             className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
-            style={{ width: layout.notesWidth, borderLeft: '1px solid rgb(var(--nb-border))' }}
+            style={{ width: layout.notesWidth }}
             data-testid="notes-panel"
           >
             <ArtifactsPanel

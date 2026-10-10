@@ -30,14 +30,16 @@ export async function fetchYouTubeTranscript(urlOrId: string): Promise<{
     throw new Error(`Не получилось распознать YouTube-ссылку: ${urlOrId}`);
   }
 
-  // Try Russian first, then English; youtube-transcript picks the first
-  // available track in its own order when `lang` is omitted, but the
-  // InnerTube fallback often returns empty for non-English-first locales.
+  // Strategy: try without specifying a language first — this picks up
+  // auto-generated subtitles (kind: "asr") that YouTube creates for
+  // most videos even when the author hasn't added manual captions.
+  // Then fall back to explicit 'ru' and 'en' in case the no-lang call
+  // picks a wrong-language auto track.
   let segments: Array<{ text: string; offset: number; duration: number }> | null = null;
   let lastErr: unknown = null;
-  for (const lang of ['ru', 'en']) {
+  for (const lang of [undefined, 'ru', 'en']) {
     try {
-      segments = await fetchTranscript(videoId, { lang });
+      segments = await fetchTranscript(videoId, lang ? { lang } : undefined);
       if (segments?.length) break;
     } catch (err) {
       lastErr = err;
@@ -77,7 +79,7 @@ export async function fetchYouTubeTranscript(urlOrId: string): Promise<{
  *  prefix because it looks like a stack trace to non-developers. */
 function friendlyYouTubeError(err: unknown, videoId: string): Error {
   if (err instanceof YoutubeTranscriptDisabledError) {
-    return new Error(`У этого видео (${videoId}) автор отключил субтитры на YouTube. Выбери другое видео или то, где сабы включены.`);
+    return new Error(`У этого видео (${videoId}) нет ни авто-, ни ручных субтитров. Попробуй включить «Распознать речь через Whisper ASR» выше и добавить видео снова.`);
   }
   if (err instanceof YoutubeTranscriptVideoUnavailableError) {
     return new Error(`YouTube говорит, что видео (${videoId}) недоступно (закрытое/удалённое/региональная блокировка). Проверь ссылку в браузере.`);

@@ -12,9 +12,7 @@ interface Props {
 }
 
 /**
- * A thin vertical grab-handle between two panels. Drag to resize; click the
- * chevron to collapse / expand the adjacent panel. The hit area is wider than
- * the visible line so it's still grabable on touchpads.
+ * A clean 1px vertical hairline divider with an invisible expanded grab-handle.
  */
 export function ResizableDivider({
   onResize,
@@ -28,7 +26,6 @@ export function ResizableDivider({
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      // ignore if the user clicked the collapse button itself
       if ((e.target as HTMLElement).closest('button')) return;
       e.preventDefault();
       setDragging(true);
@@ -63,22 +60,22 @@ export function ResizableDivider({
   return (
     <div
       onMouseDown={onMouseDown}
-      className={`group relative z-10 flex w-2 shrink-0 cursor-col-resize items-center justify-center transition-colors ${
-        dragging ? 'bg-accent/10' : 'hover:bg-accent/5'
+      className={`group relative z-10 flex w-px shrink-0 cursor-col-resize items-center justify-center transition-colors ${
+        dragging ? 'bg-accent' : 'bg-border hover:bg-accent/60'
       }`}
+      style={{
+        backgroundColor: dragging
+          ? 'rgb(var(--nb-accent))'
+          : 'rgb(var(--nb-border))',
+      }}
       title="Потяните, чтобы изменить ширину"
       role="separator"
       aria-orientation="vertical"
       aria-label="Граница панелей — потяните для изменения ширины"
     >
-      {/* Visible 1px line */}
-      <div
-        className={`h-full w-px transition-colors ${
-          dragging
-            ? 'bg-accent'
-            : 'bg-[rgb(var(--nb-border))] group-hover:bg-accent/60'
-        }`}
-      />
+      {/* Invisible wider hit-target for easy mouse grabbing */}
+      <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+
       {onToggleCollapse && (
         <button
           type="button"
@@ -89,7 +86,7 @@ export function ResizableDivider({
           onMouseDown={(e) => e.stopPropagation()}
           className={`absolute top-1/2 z-20 flex h-6 w-4 -translate-y-1/2 ${
             side === 'left' ? '-translate-x-1/2' : 'translate-x-1/2'
-          } items-center justify-center rounded-full border bg-surface text-muted opacity-0 shadow-soft transition-opacity group-hover:opacity-100 hover:text-ink`}
+          } items-center justify-center rounded-full border bg-surface text-muted opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-ink`}
           style={{ borderColor: 'rgb(var(--nb-border))' }}
           title={collapsed ? 'Развернуть панель' : 'Свернуть панель'}
           aria-label={collapsed ? 'Развернуть панель' : 'Свернуть панель'}
@@ -126,7 +123,7 @@ export function CollapsedRail({
 }) {
   return (
     <aside
-      className={`hidden shrink-0 md:flex flex-col items-center border-zinc-200 bg-canvas ${
+      className={`hidden shrink-0 md:flex flex-col items-center bg-canvas ${
         side === 'left' ? 'border-r' : 'border-l'
       }`}
       style={{

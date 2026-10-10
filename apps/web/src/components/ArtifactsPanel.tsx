@@ -140,15 +140,14 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
           </div>
         )}
         {artifacts.data && artifacts.data.artifacts.length === 0 && (
-          <div className="empty-card mt-2 py-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl"
-              style={{ backgroundColor: 'rgb(var(--nb-accent-soft))' }}>
-              <span className="text-base">📝</span>
-            </div>
-              <p className="text-sm font-medium">Пока нет заметок</p>
-              <p className="max-w-xs text-xs text-muted">
-                Сохраните ответ ассистента или создайте новую заметку.
-              </p>
+          <div className="mt-8 px-4 text-center">
+            <span className="text-3xl mb-2 inline-block opacity-80" aria-hidden>
+              📝
+            </span>
+            <p className="text-sm font-semibold text-ink">Пока нет заметок</p>
+            <p className="max-w-xs mx-auto text-xs text-muted mt-1.5 leading-relaxed">
+              Сохраните ответ ассистента или создайте новую заметку.
+            </p>
           </div>
         )}
 
@@ -168,15 +167,15 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
             }}
           />
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {artifacts.data?.artifacts.map((a) => {
               const badge = artifactBadge(a);
               return (
                 <li
                   key={a.id}
                   className={
-                    'source-pill group cursor-pointer transition-all ' +
-                    (a.id === pulseId ? 'ring-2 ring-accent' : '')
+                    'group flex items-center gap-2.5 p-2 rounded-xl transition-all hover:bg-surface-tint/60 cursor-pointer ' +
+                    (a.id === pulseId ? 'ring-1 ring-accent bg-accent-soft/30' : '')
                   }
                   onClick={() => setSelectedId(a.id)}
                   data-testid={`artifact-list-item-${a.id}`}
@@ -191,14 +190,14 @@ export function ArtifactsPanel({ notebookId, prefilled, onConsumedPrefilled }: P
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{a.title}</span>
+                      <span className="truncate text-xs font-medium text-ink">{a.title}</span>
                       {badge.label && (
                         <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-accent">
                           {badge.label}
                         </span>
                       )}
                     </div>
-                    <div className="truncate text-xs text-muted">
+                    <div className="truncate text-[11px] text-muted">
                       {badge.subtitle}
                     </div>
                     <div className="mt-0.5 text-[10px] text-subtle">

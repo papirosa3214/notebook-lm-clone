@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
@@ -50,6 +50,7 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
         readySourceCount: sql<number>`(SELECT COUNT(*) FROM ${sources} WHERE ${sources.notebookId} = ${notebooks.id} AND ${sources.status} = 'ready')`,
       })
       .from(notebooks)
+      .orderBy(desc(notebooks.createdAt))
       .all();
     return { notebooks: rows };
   });

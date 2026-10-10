@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { useTheme } from '../hooks/useTheme';
@@ -13,6 +13,7 @@ import {
 
 export default function HomePage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const { theme, toggle } = useTheme();
 
@@ -22,9 +23,12 @@ export default function HomePage() {
   });
   const create = useMutation({
     mutationFn: (t: string) => api.createNotebook(t),
-    onSuccess: () => {
+    onSuccess: (newNotebook) => {
       setTitle('');
       qc.invalidateQueries({ queryKey: ['notebooks'] });
+      if (newNotebook?.id) {
+        navigate(`/notebooks/${newNotebook.id}`);
+      }
     },
   });
 

@@ -1,7 +1,7 @@
 # --- Build stage ---
 FROM node:22-alpine AS build
 WORKDIR /repo
-RUN corepack enable && corepack prepare [email protected] --activate
+RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 
 COPY . .
 RUN pnpm install --frozen-lockfile
