@@ -8,6 +8,16 @@ import type {
   Source,
   SourceKind,
 } from '../lib/types';
+import {
+  SourceIcon,
+  PlusIcon,
+  SearchIcon,
+  RefreshIcon,
+  CloseIcon,
+  TrashIcon,
+  SparkleIcon,
+  ChevronDownIcon,
+} from './icons/NotebookLogo';
 
 interface Props {
   notebookId: string;
@@ -17,11 +27,6 @@ const KIND_LABEL: Record<SourceKind, string> = {
   url: 'URL',
   file: 'Файл',
   youtube: 'YouTube',
-};
-const KIND_GLYPH: Record<SourceKind, string> = {
-  url: '↗',
-  file: '📄',
-  youtube: '▶',
 };
 
 const STAGE_LABEL: Record<IngestStage, string> = {
@@ -67,44 +72,48 @@ export function SourcesPanel({ notebookId }: Props) {
   const totalCount = sources.data?.sources.length ?? 0;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Источники</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500">
-            {readyCount}/{totalCount}
-          </span>
-          <button
-            onClick={() => refresh.mutate()}
-            disabled={refresh.isPending}
-            className="btn btn-ghost text-xs"
-            title="Обновить список"
-          >
-            ↻
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
-        <button className="btn btn-secondary text-xs" onClick={() => setShowAddUrl(true)}>
-          + URL
-        </button>
-        <button className="btn btn-secondary text-xs" onClick={() => setShowAddYt(true)}>
-          + YouTube
-        </button>
-        <button className="btn btn-secondary text-xs" onClick={() => setShowAddFile(true)}>
-          + Файл
-        </button>
+    <div className="flex h-full flex-col bg-canvas">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <h2 className="text-[13px] font-semibold tracking-tight text-ink">
+          Источники
+          {totalCount > 0 && (
+            <span className="ml-1.5 text-xs font-normal text-muted">
+              {readyCount}/{totalCount}
+            </span>
+          )}
+        </h2>
         <button
-          className="btn btn-primary text-xs"
-          onClick={() => setShowAddSearch(true)}
-          title="Найти источники в интернете"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending}
+          className="btn-icon"
+          title="Обновить список"
         >
-          🔍 Discover
+          <RefreshIcon size={14} className={refresh.isPending ? 'animate-spin' : ''} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        {sources.isLoading && <p className="text-sm text-zinc-500">Загрузка…</p>}
+      {/* Add source — 4 circular buttons in a row, like NotebookLM */}
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+        <AddCircle label="URL" onClick={() => setShowAddUrl(true)} kind="url" />
+        <AddCircle label="YouTube" onClick={() => setShowAddYt(true)} kind="youtube" />
+        <AddCircle label="Файл" onClick={() => setShowAddFile(true)} kind="file" />
+        <AddCircle
+          label="Discover"
+          onClick={() => setShowAddSearch(true)}
+          kind="discover"
+        />
+      </div>
+
+      {/* Sources list */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        {sources.isLoading && (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="shimmer h-16 rounded-2xl" />
+            ))}
+          </div>
+        )}
         {sources.data && sources.data.sources.length === 0 && (
           <EmptyState onDiscover={() => setShowAddSearch(true)} />
         )}
@@ -138,15 +147,57 @@ export function SourcesPanel({ notebookId }: Props) {
   );
 }
 
+function AddCircle({
+  label,
+  onClick,
+  kind,
+}: {
+  label: string;
+  onClick: () => void;
+  kind: SourceKind | 'discover';
+}) {
+  const isDiscover = kind === 'discover';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex items-center gap-1.5 rounded-full border bg-surface py-1.5 pl-1.5 pr-3.5 text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-soft"
+      style={{
+        borderColor: 'rgb(var(--nb-border))',
+        color: 'rgb(var(--nb-ink))',
+      }}
+      title={`Добавить ${label.toLowerCase()}`}
+    >
+      <span
+        className="flex h-6 w-6 items-center justify-center rounded-full text-white"
+        style={{
+          backgroundColor: isDiscover ? 'rgb(var(--nb-ai-glow))' : 'rgb(var(--nb-accent))',
+        }}
+      >
+        {isDiscover ? (
+          <SparkleIcon size={11} />
+        ) : (
+          <SourceIcon kind={kind as SourceKind} size={12} />
+        )}
+      </span>
+      <span className="leading-none">{label}</span>
+    </button>
+  );
+}
+
 function EmptyState({ onDiscover }: { onDiscover: () => void }) {
   return (
-    <div className="card-accent mb-3 p-4">
+    <div className="empty-card mt-2">
+      <span className="text-3xl" aria-hidden>
+        📚
+      </span>
       <p className="text-sm font-medium">Пока нет источников</p>
-      <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-        Добавьте URL, YouTube-видео или файл. Или попросите NotebookLM найти источники по теме.
+      <p className="max-w-xs text-xs text-muted">
+        Добавьте URL, YouTube-видео или файл. Или попросите Notebook найти источники по теме.
       </p>
-      <button className="btn btn-primary mt-3 text-xs" onClick={onDiscover}>
-        🔍 Найти в интернете
+      <button className="btn btn-primary mt-2 text-xs" onClick={onDiscover}>
+        <SearchIcon size={12} />
+        Discover
       </button>
     </div>
   );
@@ -154,62 +205,68 @@ function EmptyState({ onDiscover }: { onDiscover: () => void }) {
 
 function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => void }) {
   const statusBadge = {
-    pending: { text: '⏳', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400' },
+    pending: { text: '⏳', cls: 'bg-surface-tint text-muted' },
     parsing: {
-      text: '⚙ парсинг',
-      cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+      text: 'обработка',
+      cls: 'bg-[#FEF3C7] text-[#92400E] dark:bg-[#78350F]/40 dark:text-[#FBBF24]',
     },
     ready: {
-      text: '✓ готово',
-      cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+      text: 'готово',
+      cls: 'bg-[#D1FAE5] text-[#065F46] dark:bg-[#064E3B]/50 dark:text-[#6EE7B7]',
     },
-    failed: { text: '✗ ошибка', cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+    failed: { text: 'ошибка', cls: 'bg-[#FEE2E2] text-[#991B1B] dark:bg-[#7F1D1D]/40 dark:text-[#FCA5A5]' },
   }[s.status];
   return (
-    <li className="card p-3 transition-colors hover:border-amber-300 dark:hover:border-amber-700/50">
-      <div className="flex items-start gap-2">
-        <span className="kind-pill mt-0.5" title={KIND_LABEL[s.kind]}>
-          {KIND_GLYPH[s.kind]}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium" title={s.title}>
-            {s.title}
-          </div>
+    <li className="source-pill group">
+      <span className="kind-pill" title={KIND_LABEL[s.kind]}>
+        <SourceIcon kind={s.kind} size={14} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium" title={s.title}>
+          {s.title}
+        </div>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge.cls}`}
+          >
+            {statusBadge.text}
+          </span>
           {s.url && (
             <a
               href={s.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="block truncate text-xs text-zinc-500 hover:text-amber-700 hover:underline"
+              className="truncate text-[10px] text-muted hover:text-accent hover:underline"
               title={s.url}
             >
-              {new URL(s.url).hostname}
+              {prettyHost(s.url)}
             </a>
           )}
-          <div className="mt-1 flex items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${statusBadge.cls}`}
-            >
-              {statusBadge.text}
-            </span>
-            <span className="text-[10px] text-zinc-400">{KIND_LABEL[s.kind]}</span>
-          </div>
-          {s.error && (
-            <div className="mt-1 truncate text-[10px] text-red-600" title={s.error}>
-              {s.error}
-            </div>
-          )}
         </div>
-        <button
-          onClick={onDelete}
-          className="btn btn-ghost text-xs text-red-500"
-          title="Удалить"
-        >
-          ×
-        </button>
+        {s.error && (
+          <div className="mt-1 truncate text-[10px] text-red-600" title={s.error}>
+            {s.error}
+          </div>
+        )}
       </div>
+      <button
+        onClick={onDelete}
+        className="btn-icon opacity-0 transition-opacity group-hover:opacity-100"
+        title="Удалить источник"
+        style={{ color: 'rgb(var(--nb-muted))' }}
+      >
+        <TrashIcon size={13} />
+      </button>
     </li>
   );
+}
+
+function prettyHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
 }
 
 // ============================================================
@@ -234,20 +291,23 @@ function ProgressStepper({ progress }: { progress: ProgressState }) {
     ? STAGE_ORDER.indexOf(progress.stage)
     : -1;
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs text-zinc-500">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-xs text-muted">
         <span>{progress.error ? '✗ ошибка' : progress.message || 'Готовлюсь…'}</span>
-        {!progress.error && <span>{Math.round(progress.ratio * 100)}%</span>}
+        {!progress.error && <span className="font-semibold">{Math.round(progress.ratio * 100)}%</span>}
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+      <div className="h-1.5 overflow-hidden rounded-full bg-surface-tint">
         <div
           className={`h-full transition-all duration-300 ${
-            progress.error ? 'bg-red-500' : 'bg-amber-500'
+            progress.error ? 'bg-red-500' : ''
           }`}
-          style={{ width: `${Math.round(progress.ratio * 100)}%` }}
+          style={{
+            width: `${Math.round(progress.ratio * 100)}%`,
+            backgroundColor: progress.error ? undefined : 'rgb(var(--nb-accent))',
+          }}
         />
       </div>
-      <ol className="space-y-1 text-xs">
+      <ol className="space-y-1.5 text-xs">
         {STAGE_ORDER.map((stage, i) => {
           const done = currentIndex > i || progress.ratio >= 1;
           const active = currentIndex === i && !progress.error;
@@ -258,8 +318,8 @@ function ProgressStepper({ progress }: { progress: ProgressState }) {
                 done
                   ? 'text-emerald-700 dark:text-emerald-400'
                   : active
-                    ? 'font-medium text-amber-700 dark:text-amber-300'
-                    : 'text-zinc-400'
+                    ? 'font-medium text-accent'
+                    : 'text-subtle'
               }`}
             >
               <span className="w-4 text-center">
@@ -271,7 +331,8 @@ function ProgressStepper({ progress }: { progress: ProgressState }) {
         })}
       </ol>
       {progress.error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300">
+        <p className="rounded-xl border bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300"
+          style={{ borderColor: 'rgb(252 165 165 / 0.5)' }}>
           {progress.error}
         </p>
       )}
@@ -320,15 +381,15 @@ function ConfirmDialog({
 }) {
   return (
     <Dialog title={title} onClose={onClose}>
-      <p className="text-sm text-zinc-600 dark:text-zinc-300">{message}</p>
-      <div className="mt-4 flex justify-end gap-2">
+      <p className="text-sm text-muted">{message}</p>
+      <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="btn btn-secondary">
           {cancelLabel}
         </button>
         <button
           type="button"
           onClick={onConfirm}
-          className={danger ? 'btn bg-red-600 text-white hover:bg-red-700' : 'btn btn-primary'}
+          className={danger ? 'btn !bg-[#DC2626] !text-white hover:!bg-[#B91C1C]' : 'btn btn-primary'}
         >
           {confirmLabel}
         </button>
@@ -377,29 +438,31 @@ function AddUrlDialog({ notebookId, onClose }: { notebookId: string; onClose: ()
           className="space-y-3"
         >
           <div>
-            <label className="text-xs text-zinc-500">URL</label>
+            <label className="section-label mb-1.5 block">URL</label>
             <input
-              className="input mt-1"
+              className="input"
               placeholder="https://…"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              autoFocus
               required
             />
           </div>
           <div>
-            <label className="text-xs text-zinc-500">Название (опционально)</label>
+            <label className="section-label mb-1.5 block">Название (опционально)</label>
             <input
-              className="input mt-1"
-              placeholder="RAG Wikipedia"
+              className="input"
+              placeholder="Например: RAG Wikipedia"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Отмена
             </button>
             <button type="submit" className="btn btn-primary" disabled={!url}>
+              <PlusIcon size={13} />
               Добавить
             </button>
           </div>
@@ -407,7 +470,7 @@ function AddUrlDialog({ notebookId, onClose }: { notebookId: string; onClose: ()
       )}
       {(running || progress.error) && <ProgressStepper progress={progress} />}
       {progress.error && (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-4 flex justify-end">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Закрыть
           </button>
@@ -457,28 +520,30 @@ function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose
           className="space-y-3"
         >
           <div>
-            <label className="text-xs text-zinc-500">URL или ID видео</label>
+            <label className="section-label mb-1.5 block">URL или ID видео</label>
             <input
-              className="input mt-1"
+              className="input"
               placeholder="https://youtube.com/watch?v=…"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              autoFocus
               required
             />
           </div>
           <div>
-            <label className="text-xs text-zinc-500">Название (опционально)</label>
+            <label className="section-label mb-1.5 block">Название (опционально)</label>
             <input
-              className="input mt-1"
+              className="input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Отмена
             </button>
             <button type="submit" className="btn btn-primary" disabled={!url}>
+              <PlusIcon size={13} />
               Добавить
             </button>
           </div>
@@ -486,7 +551,7 @@ function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose
       )}
       {(running || progress.error) && <ProgressStepper progress={progress} />}
       {progress.error && (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-4 flex justify-end">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Закрыть
           </button>
@@ -544,7 +609,7 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
   }
 
   return (
-    <Dialog title="🔍 Discover — найти источники в интернете" onClose={onClose}>
+    <Dialog title="Discover — найти источники" onClose={onClose}>
       {stepName === 'query' && (
         <form
           onSubmit={(e) => {
@@ -554,25 +619,25 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
           className="space-y-3"
         >
           <div>
-            <label className="text-xs text-zinc-500">Тема (DuckDuckGo, без ключей)</label>
+            <label className="section-label mb-1.5 block">Тема</label>
             <input
-              className="input mt-1"
+              className="input"
               placeholder="например: retrieval augmented generation"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoFocus
               required
             />
+            <p className="mt-1.5 text-xs text-subtle">
+              Поиск через DuckDuckGo, без ключей. На втором шаге можно выбрать результаты.
+            </p>
           </div>
           {previewMutation.isError && (
             <p className="text-xs text-red-600">
               {(previewMutation.error as Error).message}
             </p>
           )}
-          <p className="text-xs text-zinc-500">
-            На втором шаге можно отметить, какие результаты загружать в ноутбук.
-          </p>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Отмена
             </button>
@@ -590,8 +655,8 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
       {stepName === 'preview' && (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs text-zinc-500">
-              Найдено {results.length} результатов · выбрано {selected.size}
+            <div className="text-xs text-muted">
+              Найдено {results.length} · выбрано {selected.size}
             </div>
             <div className="flex gap-1">
               <button type="button" onClick={() => setSelected(new Set(results.map((r) => r.url)))} className="btn btn-ghost text-xs">
@@ -606,10 +671,20 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
           <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
             {results.map((r) => (
               <li key={r.url}>
-                <label className="card flex cursor-pointer gap-2 p-2 transition-colors hover:border-amber-400 has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50 dark:has-[:checked]:bg-amber-900/10">
+                <label
+                  className={`flex cursor-pointer gap-3 rounded-2xl border bg-surface p-3 transition-all ${
+                    selected.has(r.url) ? 'border-accent bg-accent-soft/40' : ''
+                  }`}
+                  style={{
+                    borderColor: selected.has(r.url)
+                      ? 'rgb(var(--nb-accent))'
+                      : 'rgb(var(--nb-border))',
+                  }}
+                >
                   <input
                     type="checkbox"
-                    className="mt-1 h-4 w-4 shrink-0 accent-amber-600"
+                    className="mt-1 h-4 w-4 shrink-0"
+                    style={{ accentColor: 'rgb(var(--nb-accent))' }}
                     checked={selected.has(r.url)}
                     onChange={() => toggle(r.url)}
                   />
@@ -617,11 +692,11 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
                     <div className="truncate text-sm font-medium" title={r.title}>
                       {r.title}
                     </div>
-                    <div className="truncate text-xs text-zinc-500" title={r.url}>
-                      {new URL(r.url).hostname}
+                    <div className="truncate text-xs text-muted" title={r.url}>
+                      {prettyHost(r.url)}
                     </div>
                     {r.snippet && (
-                      <div className="mt-1 line-clamp-2 text-xs text-zinc-600 dark:text-zinc-400">
+                      <div className="mt-1 line-clamp-2 text-xs text-muted">
                         {r.snippet}
                       </div>
                     )}
@@ -631,7 +706,7 @@ function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: 
             ))}
           </ul>
 
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             Будет загружено {selected.size} источник{russianPlural(selected.size)}. Это займёт
             ~{selected.size * 4} сек.
           </p>
@@ -707,12 +782,12 @@ function AddFileDialog({ notebookId, onClose }: { notebookId: string; onClose: (
           className="block w-full text-sm"
         />
         {file && (
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             {file.name} ({Math.round(file.size / 1024)} KB)
           </p>
         )}
         {upload.isError && <p className="text-xs text-red-600">{String(upload.error)}</p>}
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="btn btn-secondary">
             Отмена
           </button>
@@ -748,18 +823,15 @@ function Dialog({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
+    <div className="modal-backdrop animate-fade-in" onClick={onClose}>
       <div
-        className="card w-full max-w-lg p-5 animate-fade-in"
+        className="card-pop w-full max-w-lg p-6 animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold">{title}</h3>
-          <button onClick={onClose} className="btn btn-ghost">
-            ×
+          <button onClick={onClose} className="btn-icon" title="Закрыть">
+            <CloseIcon size={16} />
           </button>
         </div>
         {children}

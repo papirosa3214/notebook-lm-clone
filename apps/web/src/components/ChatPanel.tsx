@@ -3,6 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { streamChat } from '../lib/stream';
 import type { ChatMessage, CitationChunk } from '../lib/types';
+import { Dot } from './Dot';
+import {
+  SendIcon,
+  StopIcon,
+  SparkleIcon,
+  ChevronDownIcon,
+} from './icons/NotebookLogo';
 
 interface Props {
   notebookId: string;
@@ -16,6 +23,7 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<(() => void) | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const notebook = useQuery({
     queryKey: ['notebook', notebookId],
@@ -39,10 +47,19 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Auto-resize textarea as user types
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }, [input]);
+
   function send() {
     const text = input.trim();
     if (!text || streaming) return;
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     const userMsg: ChatMessage = { role: 'user', content: text };
     const assistantMsg: ChatMessage = { role: 'assistant', content: '', pending: true };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -97,33 +114,63 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
     setStreaming(false);
   }
 
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Чат</h2>
-        <select
-          className="input w-auto py-1 text-xs"
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-        >
-          <option value="ollama">Ollama</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-        </select>
-        <input
-          className="input flex-1 py-1 text-xs"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="модель"
-        />
+    <div className="flex h-full flex-col bg-canvas md:bg-surface">
+      {/* ---- Provider/model strip ---- */}
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-2"
+        style={{ borderColor: 'rgb(var(--nb-border))' }}>
+        <div className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-subtle">
+            <SparkleIcon size={11} className="text-accent" />
+            Чат
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <select
+            className="cursor-pointer rounded-full border bg-surface-tint py-1 pl-3 pr-7 text-xs font-medium text-ink transition-colors hover:bg-surface"
+            style={{ borderColor: 'rgb(var(--nb-border))' }}
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+          >
+            <option value="ollama">Ollama</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+          </select>
+          <input
+            className="w-44 rounded-full border bg-surface-tint py-1 px-3 text-xs transition-colors hover:bg-surface focus:bg-surface"
+            style={{ borderColor: 'rgb(var(--nb-border))' }}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="модель"
+            title={model}
+          />
+        </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      {/* ---- Messages ---- */}
+      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
         {messages.length === 0 && (
-          <p className="text-sm text-zinc-500">
-            Задай вопрос по источникам. Ассистент ответит с цитатами [N] — кликни на маркер, чтобы
-            увидеть откуда цитата.
-          </p>
+          <div className="flex h-full items-center justify-center">
+            <div className="max-w-md text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl"
+                style={{ backgroundColor: 'rgb(var(--nb-accent-soft))' }}>
+                <SparkleIcon size={22} className="text-accent" />
+              </div>
+              <h3 className="text-base font-semibold">Задайте вопрос по источникам</h3>
+              <p className="mt-1 text-sm text-muted">
+                Ассистент ответит с цитатами{' '}
+                <span className="chip-indigo mx-0.5">[1]</span>{' '}
+                — кликните на маркер, чтобы увидеть оригинал.
+              </p>
+            </div>
+          </div>
         )}
         {messages.map((m, i) => (
           <MessageBubble
@@ -136,29 +183,65 @@ export function ChatPanel({ notebookId, onSaveArtifact, onOpenCitation }: Props)
         <div ref={bottomRef} />
       </div>
 
+      {/* ---- Input ---- */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           send();
         }}
-        className="flex gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800"
+        className="border-t p-3 md:p-4"
+        style={{ borderColor: 'rgb(var(--nb-border))' }}
       >
-        <input
-          className="input flex-1"
-          placeholder={streaming ? 'Генерация…' : 'Спроси что-нибудь…'}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={streaming}
-        />
-        {streaming ? (
-          <button type="button" onClick={stop} className="btn btn-secondary">
-            Стоп
-          </button>
-        ) : (
-          <button type="submit" className="btn btn-primary" disabled={!input.trim()}>
-            Отправить
-          </button>
-        )}
+        <div
+          className="flex items-end gap-2 rounded-2xl border bg-surface px-3 py-2 transition-all focus-within:border-accent"
+          style={{ borderColor: 'rgb(var(--nb-border))' }}
+        >
+          <textarea
+            ref={textareaRef}
+            className="min-h-[28px] max-h-40 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm leading-relaxed focus:outline-none focus:ring-0"
+            placeholder={
+              streaming
+                ? 'Генерация ответа…'
+                : 'Спросите что-нибудь по вашим источникам…'
+            }
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            disabled={streaming}
+            rows={1}
+            style={{ outline: 'none' }}
+          />
+          {streaming ? (
+            <button
+              type="button"
+              onClick={stop}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-all hover:opacity-90"
+              title="Остановить генерацию"
+            >
+              <StopIcon size={12} />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-soft transition-all hover:bg-accent-hover disabled:opacity-40"
+              title="Отправить (Enter)"
+            >
+              <SendIcon size={14} />
+            </button>
+          )}
+        </div>
+        <p className="mt-1.5 text-center text-[10px] text-subtle">
+          Ответ может содержать неточности — проверяйте важные факты.{' '}
+          <kbd className="rounded bg-surface-tint px-1.5 py-0.5 text-[10px] font-medium">
+            Enter
+          </kbd>{' '}
+          для отправки ·{' '}
+          <kbd className="rounded bg-surface-tint px-1.5 py-0.5 text-[10px] font-medium">
+            Shift+Enter
+          </kbd>{' '}
+          для новой строки
+        </p>
       </form>
     </div>
   );
@@ -175,24 +258,47 @@ function MessageBubble({
 }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-amber-600 px-4 py-2 text-sm text-white shadow-sm">
+      <div className="flex justify-end animate-fade-up">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-[15px] text-white shadow-soft">
           {message.content}
         </div>
       </div>
     );
   }
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[90%] space-y-2">
-        <div className="card px-4 py-3 text-sm">
-          <AnswerContent
-            text={message.content || (message.pending ? '⏳' : '…')}
-            citations={message.citations}
-            onOpenCitation={onOpenCitation}
-          />
+    <div className="flex animate-fade-up items-start gap-3">
+      <div
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl"
+        style={{
+          background:
+            'linear-gradient(135deg, rgb(var(--nb-ai)) 0%, rgb(46 38 117) 100%)',
+        }}
+      >
+        <SparkleIcon size={14} className="text-white" />
+      </div>
+      <div className="min-w-0 max-w-[88%] flex-1 space-y-2">
+        <div className="prose-chat rounded-2xl rounded-tl-md border bg-surface px-4 py-3"
+          style={{ borderColor: 'rgb(var(--nb-border) / 0.6)' }}>
+          {message.pending && !message.content ? (
+            <span className="inline-flex items-center gap-1.5 text-muted">
+              <Dot delay={0} />
+              <Dot delay={150} />
+              <Dot delay={300} />
+            </span>
+          ) : (
+            <AnswerContent
+              text={message.content}
+              citations={message.citations}
+              onOpenCitation={onOpenCitation}
+            />
+          )}
         </div>
-        {message.error && <div className="text-xs text-red-600">Ошибка: {message.error}</div>}
+        {message.error && (
+          <div className="rounded-xl border bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300"
+            style={{ borderColor: 'rgb(252 165 165 / 0.5)' }}>
+            Ошибка: {message.error}
+          </div>
+        )}
         {message.citations && message.citations.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {message.citations.map((c, idx) => (
@@ -200,7 +306,7 @@ function MessageBubble({
                 key={c.id}
                 type="button"
                 onClick={() => onOpenCitation?.(c, idx)}
-                className="chip-indigo cursor-pointer hover:brightness-95"
+                className="chip-indigo cursor-pointer transition-all hover:brightness-95"
                 title={c.text}
               >
                 [{idx + 1}] {c.sourceTitle}
@@ -214,9 +320,9 @@ function MessageBubble({
             onClick={() => {
               void onSaveArtifact('?', message.content, message.citations ?? []);
             }}
-            title="Сохранить как артефакт"
+            title="Сохранить как заметку"
           >
-            💾 Сохранить как артефакт
+            Сохранить в заметки
           </button>
         )}
       </div>
@@ -263,7 +369,7 @@ function AnswerContent({
     if (trimmed.startsWith('## ')) {
       flushBullets();
       blocks.push(
-        <h3 key={`h-${key++}`} className="mt-3 text-sm font-semibold uppercase tracking-wide text-zinc-500 first:mt-0">
+        <h3 key={`h-${key++}`} className="first:mt-0">
           {trimmed.slice(3)}
         </h3>,
       );
@@ -304,7 +410,7 @@ function renderInline(
             key={`c-${key++}`}
             type="button"
             onClick={() => onOpenCitation(chunk, n - 1)}
-            className="chip-indigo mx-0.5 cursor-pointer !py-0 align-baseline"
+            className="chip-indigo mx-0.5 cursor-pointer align-baseline transition-all hover:brightness-95"
             title={chunk.text}
           >
             [{n}]
@@ -312,7 +418,7 @@ function renderInline(
         );
       } else {
         parts.push(
-          <span key={`c-${key++}`} className="chip-indigo mx-0.5 !py-0 align-baseline">
+          <span key={`c-${key++}`} className="chip-indigo mx-0.5 align-baseline">
             [{n}]
           </span>,
         );
