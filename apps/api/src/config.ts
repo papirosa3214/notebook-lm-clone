@@ -30,8 +30,9 @@ const schema = z.object({
   WHISPER_BASE_URL: z.string().url().default('http://127.0.0.1:8000'),
   WHISPER_LANGUAGE: z.string().default('ru'),
 
-  // Path to a Netscape-format cookies.txt for yt-dlp (optional). Required
-  // for YouTube downloads without bot walls; empty disables cookies.
+  // Path to a Netscape-format cookies.txt for yt-dlp (optional). Пусто →
+  // yt-dlp подхватит ~/.config/yt.cookies.txt, если файл есть. Куки нужны,
+  // чтобы пройти бот-проверку YouTube «Sign in to confirm you're not a bot».
   YT_COOKIES_PATH: z.string().optional(),
 
   // Rerank provider. Pluggable so we can swap the slow LLM-rerank for a

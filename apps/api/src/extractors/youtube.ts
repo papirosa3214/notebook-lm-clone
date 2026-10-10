@@ -1,64 +1,186 @@
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  YoutubeTranscriptDisabledError,
-  YoutubeTranscriptError,
-  YoutubeTranscriptNotAvailableError,
-  YoutubeTranscriptNotAvailableLanguageError,
-  YoutubeTranscriptTooManyRequestError,
-  YoutubeTranscriptVideoUnavailableError,
-} from 'youtube-transcript';
+  extractVideoId,
+  lastErrorLine,
+  runProc,
+  which,
+  ytCookiesPath,
+} from './ytDlp.js';
+
+/** Русский — единственный нужный язык. Другие дорожки не качаем никогда. */
+const SUB_LANG = 'ru';
+const SUB_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
- * Fetch the transcript of a YouTube video. youtube-transcript returns
- * segments with text + offset; we join them into timestamped paragraphs.
+ * Транскрипт YouTube-видео в виде `[m:ss] текст`.
  *
- * Throws human-readable Russian errors instead of the upstream
- * `[YoutubeTranscript] 🚫 ... (videoId)` strings so the UI doesn't
- * look like a stack trace.
+ * Основной путь — бинарь `yt-dlp` с cookies пользователя: он берёт и
+ * ручные субтитры, и автосубы, и проходит «Sign in to confirm you're not
+ * a bot». Запасной путь (бинаря нет) — библиотека `youtube-transcript`:
+ * она куки не поддерживает и на части видео упирается в бот-стену,
+ * поэтому её ошибки мы показываем честно, без приукрашивания.
  */
 export async function fetchYouTubeTranscript(urlOrId: string): Promise<{
   text: string;
   title: string;
 }> {
-  const { fetchTranscript } = (await import('youtube-transcript')) as unknown as {
-    fetchTranscript(
-      videoId: string,
-      config?: { lang?: string },
-    ): Promise<Array<{ text: string; offset: number; duration: number }>>;
-  };
   const videoId = extractVideoId(urlOrId);
   if (!videoId) {
     throw new Error(`Не получилось распознать YouTube-ссылку: ${urlOrId}`);
   }
 
-  // Strategy: try without specifying a language first — this picks up
-  // auto-generated subtitles (kind: "asr") that YouTube creates for
-  // most videos even when the author hasn't added manual captions.
-  // Then fall back to explicit 'ru' and 'en' in case the no-lang call
-  // picks a wrong-language auto track.
-  let segments: Array<{ text: string; offset: number; duration: number }> | null = null;
+  const ytDlp = await which('yt-dlp');
+  if (ytDlp) return fetchViaYtDlp(ytDlp, videoId);
+
+  return fetchViaLibrary(videoId);
+}
+
+async function fetchViaYtDlp(ytDlp: string, videoId: string): Promise<{
+  text: string;
+  title: string;
+}> {
+  const dir = await mkdtemp(join(tmpdir(), 'yt-subs-'));
+  const cookies = await ytCookiesPath();
+  try {
+    const args = [
+      '--no-warnings',
+      '--no-playlist',
+      '--no-progress',
+      // Видео не качаем — только дорожка субтитров на русском.
+      '--skip-download',
+      '--write-subs',
+      '--write-auto-subs',
+      '--sub-langs',
+      SUB_LANG,
+      '--sub-format',
+      'json3',
+      '-o',
+      join(dir, `${videoId}.%(ext)s`),
+      // Название видео печатаем вместо «YouTube <id>». --print по умолчанию
+      // включает --simulate, поэтому файлы не писались бы — отключаем явно.
+      '--print',
+      'title',
+      '--no-simulate',
+      ...(cookies ? ['--cookies', cookies] : []),
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ];
+
+    const { stdout, stderr, code } = await runProc(ytDlp, args, SUB_TIMEOUT_MS);
+    if (code !== 0) {
+      throw new Error(ytDlpFailure(videoId, stderr, code));
+    }
+
+    const files = (await readdir(dir)).filter((f) => f.endsWith(`.${SUB_LANG}.json3`));
+    const file = files.at(0);
+    if (!file) {
+      const reason = lastErrorLine(stderr);
+      throw new Error(
+        `yt-dlp не нашёл субтитров на языке «${SUB_LANG}» у видео ${videoId}.` +
+          (reason ? ` yt-dlp сказал: ${reason}` : ' yt-dlp ничего не сообщил.'),
+      );
+    }
+
+    const raw = await readFile(join(dir, file), 'utf8');
+    const text = parseJson3Transcript(raw);
+    if (!text) {
+      throw new Error(`Файл субтитров ${file} есть, но текста в нём нет (${videoId}).`);
+    }
+
+    const title = stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)[0];
+    return { text, title: title || `YouTube ${videoId}` };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Разбор json3 (формат `--sub-format json3`) в `[m:ss] текст`.
+ * Сегменты складываем в корзины по 30 секунд — так retrieval видит
+ * осмысленные диапазоны времени. Экспортируется ради тестов.
+ */
+export function parseJson3Transcript(raw: string): string {
+  const parsed = JSON.parse(raw) as {
+    events?: Array<{ tStartMs?: number; segs?: Array<{ utf8?: string }> }>;
+  };
+  const events = Array.isArray(parsed?.events) ? parsed.events : [];
+
+  const buckets = new Map<number, string[]>();
+  for (const ev of events) {
+    const text = (ev?.segs ?? [])
+      .map((s) => s?.utf8 ?? '')
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) continue;
+    const startMs = Number(ev?.tStartMs ?? 0) || 0;
+    const bucket = Math.floor(startMs / 30_000) * 30;
+    if (!buckets.has(bucket)) buckets.set(bucket, []);
+    buckets.get(bucket)!.push(text);
+  }
+
+  const lines: string[] = [];
+  for (const [sec, texts] of [...buckets.entries()].sort(([a], [b]) => a - b)) {
+    lines.push(`[${formatTs(sec)}] ${texts.join(' ')}`);
+  }
+  return lines.join('\n\n');
+}
+
+/** Причина отказа yt-dlp — показываем как есть, без приукрашивания. */
+function ytDlpFailure(videoId: string, stderr: string, code: number | null): string {
+  const reason = lastErrorLine(stderr) ?? `yt-dlp завершился с кодом ${code}`;
+  let hint = '';
+  if (/cookies are no longer valid/i.test(stderr)) {
+    hint = ' Файл cookies.txt устарел: YouTube ротировал сессию, выгрузи куки заново.';
+  } else if (/not a bot/i.test(stderr)) {
+    hint = ' Бот-проверка YouTube. Помогают свежие куки (YT_COOKIES_PATH или ~/.config/yt.cookies.txt).';
+  }
+  return `YouTube не отдал субтитры (${videoId}): ${reason}${hint}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Запасной путь: библиотека youtube-transcript (куки не поддерживает) */
+/* ------------------------------------------------------------------ */
+
+async function fetchViaLibrary(videoId: string): Promise<{ text: string; title: string }> {
+  const lib = (await import('youtube-transcript')) as unknown as {
+    fetchTranscript: (
+      id: string,
+      cfg?: { lang?: string },
+    ) => Promise<Array<{ text: string; offset: number }>>;
+    YoutubeTranscriptNotAvailableError: ErrorConstructor;
+    YoutubeTranscriptNotAvailableLanguageError: ErrorConstructor;
+  };
+
+  // Русский, затем английский: InnerTube для не-англоязычных локалей
+  // часто отдаёт пустоту. Только два языка, никакого перебора дорожек.
+  let segments: Array<{ text: string; offset: number }> | null = null;
   let lastErr: unknown = null;
-  for (const lang of [undefined, 'ru', 'en']) {
+  for (const lang of [SUB_LANG, 'en']) {
     try {
-      segments = await fetchTranscript(videoId, lang ? { lang } : undefined);
+      segments = await lib.fetchTranscript(videoId, { lang });
       if (segments?.length) break;
     } catch (err) {
       lastErr = err;
-      // For "not available in <lang>" keep trying the next language;
-      // for hard failures (disabled / unavailable / captcha) rethrow.
       if (
-        !(err instanceof YoutubeTranscriptNotAvailableLanguageError) &&
-        !(err instanceof YoutubeTranscriptNotAvailableError)
+        !(err instanceof lib.YoutubeTranscriptNotAvailableLanguageError) &&
+        !(err instanceof lib.YoutubeTranscriptNotAvailableError)
       ) {
-        throw friendlyYouTubeError(err, videoId);
+        throw await libraryError(err, videoId);
       }
     }
   }
   if (!segments?.length) {
-    if (lastErr) throw friendlyYouTubeError(lastErr, videoId);
-    throw new Error(`У этого видео (${videoId}) нет доступных субтитров. Попробуй другое видео или включи у этого автора субтитры на YouTube.`);
+    if (lastErr) throw await libraryError(lastErr, videoId);
+    throw new Error(
+      `У видео ${videoId} нет доступных субтитров на русском. Поставь yt-dlp (brew install yt-dlp) — он берёт автосубы и работает с куками.`,
+    );
   }
 
-  // Group segments into ~30s buckets so each chunk has a useful timestamp range.
   const groups = new Map<number, string[]>();
   for (const seg of segments) {
     const bucket = Math.floor(seg.offset / 30_000) * 30;
@@ -69,51 +191,44 @@ export async function fetchYouTubeTranscript(urlOrId: string): Promise<{
   for (const [sec, texts] of [...groups.entries()].sort(([a], [b]) => a - b)) {
     lines.push(`[${formatTs(sec)}] ${texts.join(' ').replace(/\s+/g, ' ').trim()}`);
   }
-  const text = lines.join('\n\n');
-  const title = `YouTube ${videoId}`;
-  return { text, title };
+  return { text: lines.join('\n\n'), title: `YouTube ${videoId}` };
 }
 
-/** Translate the raw `youtube-transcript` error classes into a Russian
- *  message the UI can show as-is. We strip the `[YoutubeTranscript] 🚫 …`
- *  prefix because it looks like a stack trace to non-developers. */
-function friendlyYouTubeError(err: unknown, videoId: string): Error {
+async function libraryError(err: unknown, videoId: string): Promise<Error> {
+  const {
+    YoutubeTranscriptDisabledError,
+    YoutubeTranscriptNotAvailableError,
+    YoutubeTranscriptNotAvailableLanguageError,
+    YoutubeTranscriptTooManyRequestError,
+    YoutubeTranscriptVideoUnavailableError,
+  } = (await import('youtube-transcript')) as unknown as {
+    YoutubeTranscriptDisabledError: ErrorConstructor;
+    YoutubeTranscriptNotAvailableError: ErrorConstructor;
+    YoutubeTranscriptNotAvailableLanguageError: ErrorConstructor;
+    YoutubeTranscriptTooManyRequestError: ErrorConstructor;
+    YoutubeTranscriptVideoUnavailableError: ErrorConstructor;
+  };
+  const msg = err instanceof Error ? err.message : String(err);
   if (err instanceof YoutubeTranscriptDisabledError) {
-    return new Error(`У этого видео (${videoId}) нет ни авто-, ни ручных субтитров. Попробуй включить «Распознать речь через Whisper ASR» выше и добавить видео снова.`);
-  }
-  if (err instanceof YoutubeTranscriptVideoUnavailableError) {
-    return new Error(`YouTube говорит, что видео (${videoId}) недоступно (закрытое/удалённое/региональная блокировка). Проверь ссылку в браузере.`);
+    return new Error(`Автор отключил субтитры у видео ${videoId}.`);
   }
   if (err instanceof YoutubeTranscriptNotAvailableLanguageError) {
-    return new Error(`У видео (${videoId}) нет субтитров на русском и английском. Попробуй включить сабы в другом языке на самом YouTube или выбрать другое видео.`);
+    return new Error(`У видео ${videoId} нет субтитров на русском и английском.`);
   }
   if (err instanceof YoutubeTranscriptNotAvailableError) {
-    return new Error(`У видео (${videoId}) нет доступных субтитров. Попробуй другое видео.`);
+    return new Error(`У видео ${videoId} нет доступных субтитров.`);
   }
   if (err instanceof YoutubeTranscriptTooManyRequestError) {
-    return new Error(`YouTube попросил подтвердить, что я не бот (капча). Подожди минуту и попробуй снова.`);
+    return new Error(
+      `YouTube потребовал подтверждение, что я не бот. Этот путь ходит без cookies; поставь yt-dlp для надёжного варианта.`,
+    );
   }
-  if (err instanceof YoutubeTranscriptError) {
-    // Unknown YoutubeTranscriptError subclass — surface a clean message
-    // instead of the raw `[YoutubeTranscript] 🚨 ...` prefix.
-    const msg = (err.message || '').replace(/^\[YoutubeTranscript\]\s*[^\s]*\s*/, '').trim();
-    return new Error(`YouTube вернул ошибку для видео ${videoId}: ${msg || 'неизвестная ошибка субтитров'}`);
+  if (err instanceof YoutubeTranscriptVideoUnavailableError) {
+    return new Error(
+      `YouTube не отдал страницу видео ${videoId}: ${msg}. Обычно это бот-проверка или региональная блокировка; yt-dlp с куками это обходит.`,
+    );
   }
-  // Anything else (network, parse, etc.) — pass through the raw message
-  // so we don't swallow real bugs.
   return err instanceof Error ? err : new Error(String(err));
-}
-
-function extractVideoId(input: string): string | null {
-  const patterns = [
-    /(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
-    /^([A-Za-z0-9_-]{11})$/,
-  ];
-  for (const re of patterns) {
-    const m = input.match(re);
-    if (m && m[1]) return m[1];
-  }
-  return null;
 }
 
 function formatTs(sec: number): string {
