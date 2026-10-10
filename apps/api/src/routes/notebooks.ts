@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
@@ -7,7 +7,7 @@ import { notebooks, sources } from '../db/schema.js';
 
 const CreateBody = z.object({
   title: z.string().min(1).max(200),
-  defaultProvider: z.enum(['anthropic', 'openai', 'ollama']).optional(),
+  defaultProvider: z.enum(['anthropic', 'openai', 'ollama', 'minimax']).optional(),
   defaultModel: z.string().optional(),
 });
 
@@ -25,8 +25,11 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id,
         title,
-        defaultProvider: defaultProvider ?? 'anthropic',
-        defaultModel: defaultModel ?? 'claude-sonnet-4-5',
+        // По умолчанию — MiniMax-M3 через прокси https://api.minimax.io/anthropic.
+        // Ключ задаётся в env как MINIMAX_API_KEY. Если ключ не задан, провайдер
+        // бросит ошибку при первом чате — пользователь увидит её явно.
+        defaultProvider: defaultProvider ?? 'minimax',
+        defaultModel: defaultModel ?? 'MiniMax-M3',
       })
       .run();
 
@@ -47,6 +50,7 @@ export const notebookRoutes: FastifyPluginAsync = async (app) => {
         readySourceCount: sql<number>`(SELECT COUNT(*) FROM ${sources} WHERE ${sources.notebookId} = ${notebooks.id} AND ${sources.status} = 'ready')`,
       })
       .from(notebooks)
+      .orderBy(desc(notebooks.createdAt))
       .all();
     return { notebooks: rows };
   });

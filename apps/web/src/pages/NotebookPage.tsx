@@ -1,15 +1,26 @@
-import { Link, useParams } from 'react-router-dom';
-import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ruPlural } from '../lib/ruPlural';
+import { useSwipe } from '../lib/useSwipe';
+import { answerAsMarkdown, conversationAsMarkdown, downloadText, slugifyFilename } from '../lib/download';
 import { SourcesPanel } from '../components/SourcesPanel';
+import { SourceDetailSheet } from '../components/SourceDetailSheet';
+import { SourceScopeProvider } from '../lib/sourceScopeContext';
+import { SourcesStrip } from '../components/SourcesStrip';
 import { ChatPanel } from '../components/ChatPanel';
+import { PanelErrorBoundary } from '../components/ErrorBoundary';
 import { ArtifactsPanel } from '../components/ArtifactsPanel';
 import { SummaryPanel } from '../components/SummaryPanel';
+import { AudioOverviewDialog } from '../components/AudioOverviewDialog';
+import { StudioReportDialog } from '../components/StudioReportDialog';
+import { DeepResearchDialog } from '../components/DeepResearchDialog';
+import { ShareDialog } from '../components/ShareDialog';
 import { ResizableDivider, CollapsedRail } from '../components/ResizableDivider';
 import { useTheme } from '../hooks/useTheme';
 import type { CitationChunk } from '../lib/types';
+import { CommandPalette, useCommandPaletteHotkey, type CommandDef } from '../components/CommandPalette';
 import {
   NotebookLogoMark,
   MoonIcon,
@@ -25,17 +36,9 @@ function buildArtifactMarkdown(
   answer: string,
   citations: CitationChunk[],
 ): { title: string; contentMd: string } {
-  const title = question.length > 80 ? question.slice(0, 77) + '…' : question;
-  const lines = [`# ${title}`, '', '## Ответ', '', answer.trim(), ''];
-  if (citations.length > 0) {
-    lines.push('## Источники', '');
-    citations.forEach((c, i) => {
-      lines.push(`**[${i + 1}]** ${c.sourceTitle}`);
-      const snippet = c.text.length > 400 ? c.text.slice(0, 400) + '…' : c.text;
-      lines.push('', snippet, '');
-    });
-  }
-  return { title, contentMd: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n' };
+  // One shared builder so an answer saved as a note is byte-identical
+  // to the one produced by the chat's copy / download actions.
+  return { title: question, contentMd: answerAsMarkdown(question, answer, citations) };
 }
 
 type MobileTab = 'sources' | 'overview' | 'chat' | 'artifacts';
@@ -45,23 +48,56 @@ interface LayoutState {
   notesWidth: number;
   sourcesCollapsed: boolean;
   notesCollapsed: boolean;
+  /** Which page-level layout to render. */
+  mode: 'threeColumn' | 'notebooklm';
 }
 
 const DEFAULT_LAYOUT: LayoutState = {
   sourcesWidth: 300,
-  notesWidth: 320,
+  notesWidth: 340,
   sourcesCollapsed: false,
+  // Notes (artifacts) start open. They used to default to collapsed —
+  // the panel can still be closed from the right rail, but hiding
+  // artifacts by default made the page look broken and left Studio
+  // reports / Audio Overviews / Deep Research results with nowhere
+  // visible to land.
   notesCollapsed: false,
+  mode: 'threeColumn',
 };
 
-const LAYOUT_KEY = 'nb.layout';
+// v2: the notes panel now defaults to open. Bumping the key means an
+// existing installation picks up the new default once instead of
+// keeping a stale `notesCollapsed: true` from the old layout blob.
+const LAYOUT_KEY = 'nb.layout.v2';
+
+/**
+ * Below this viewport width the two side panels (300 + 340 px plus
+ * resizers) squeeze the chat into a phone-width column — the layout
+ * still renders its desktop markup, it just has no room, which reads
+ * as "mobile version on a desktop". The notes panel therefore opens
+ * only when there is space for it, and closes again if the window
+ * shrinks. A manual toggle always wins over this heuristic.
+ */
+const NOTES_AUTO_OPEN_MIN_WIDTH = 1280;
+
+/** Set once the user toggles the notes panel themselves, so the
+ *  viewport heuristic stops overriding their choice on later loads. */
+const NOTES_MANUAL_KEY = 'nb.layout.notesManual';
+
+function defaultNotesCollapsed(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.innerWidth < NOTES_AUTO_OPEN_MIN_WIDTH;
+}
 const MIN_PANEL = 200;
 const MAX_PANEL = 600;
 
 function loadLayout(): LayoutState {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return DEFAULT_LAYOUT;
+    // No stored blob yet (first visit, or the v2 key bump): decide the
+    // notes panel from the viewport instead of unconditionally opening
+    // it into a window that cannot fit it.
+    if (!raw) return { ...DEFAULT_LAYOUT, notesCollapsed: defaultNotesCollapsed() };
     const parsed = JSON.parse(raw) as Partial<LayoutState>;
     return {
       sourcesWidth: clamp(
@@ -76,6 +112,7 @@ function loadLayout(): LayoutState {
       ),
       sourcesCollapsed: Boolean(parsed.sourcesCollapsed),
       notesCollapsed: Boolean(parsed.notesCollapsed),
+      mode: parsed.mode === 'notebooklm' ? 'notebooklm' : 'threeColumn',
     };
   } catch {
     return DEFAULT_LAYOUT;
@@ -89,12 +126,111 @@ function clamp(n: number, lo: number, hi: number) {
 export default function NotebookPage() {
   const { id } = useParams<{ id: string }>();
   const notebookId = id!;
+  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
+  const [paletteOpen, openPalette, closePalette] = useCommandPaletteHotkey();
+
+  // Tracks whether notesCollapsed is still being decided for the user.
+  // Once they toggle the panel themselves we stop second-guessing them,
+  // including across reloads (hence the persisted flag).
+  const autoNotesRef = useRef(
+    (() => {
+      try {
+        return localStorage.getItem(NOTES_MANUAL_KEY) !== '1';
+      } catch {
+        return true;
+      }
+    })(),
+  );
+
+  const updateLayout = useCallback((patch: Partial<LayoutState>) => {
+    setLayout((prev) => {
+      const next = { ...prev, ...patch };
+      try {
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+      } catch {
+        /* quota — ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  // The user asked for the notes panel explicitly — stop auto-toggling.
+  const setNotesCollapsed = useCallback(
+    (collapsed: boolean) => {
+      autoNotesRef.current = false;
+      try {
+        localStorage.setItem(NOTES_MANUAL_KEY, '1');
+      } catch {
+        /* quota — ignore */
+      }
+      updateLayout({ notesCollapsed: collapsed });
+    },
+    [updateLayout],
+  );
+
+  // Open the notes panel only while there is room for it. Without this
+  // a window around 1100 px wide renders 300 + 340 px of side panels
+  // and leaves the chat a phone-width strip.
+  useEffect(() => {
+    function syncToViewport() {
+      if (!autoNotesRef.current) return;
+      const shouldCollapse = window.innerWidth < NOTES_AUTO_OPEN_MIN_WIDTH;
+      setLayout((prev) =>
+        prev.notesCollapsed === shouldCollapse ? prev : { ...prev, notesCollapsed: shouldCollapse },
+      );
+    }
+    syncToViewport();
+    window.addEventListener('resize', syncToViewport);
+    return () => window.removeEventListener('resize', syncToViewport);
+  }, []);
+  const commands: CommandDef[] = [
+    {
+      id: 'home',
+      label: '🏠 На главную',
+      hint: 'список ноутбуков',
+      keywords: ['home', 'notebooks', 'list'],
+      run: () => navigate('/'),
+    },
+    {
+      id: 'theme',
+      label: theme === 'dark' ? '☀️ Светлая тема' : '🌙 Тёмная тема',
+      hint: 'переключить',
+      keywords: ['theme', 'dark', 'light', 'тёмная'],
+      run: () => toggle(),
+    },
+    {
+      id: 'deep-research',
+      label: '🔎 Deep Research',
+      hint: 'агент найдёт источники и напишет отчёт',
+      keywords: ['research', 'deep', 'agent', 'исследование', 'поиск'],
+      run: () => setShowDeepResearchDialog(true),
+    },
+    {
+      id: 'collapse-sources',
+      label: '📚 Скрыть источники',
+      hint: 'левая панель',
+      keywords: ['collapse', 'sources', 'panel', 'скрыть'],
+      run: () => updateLayout?.({ sourcesCollapsed: true }),
+    },
+    {
+      id: 'collapse-notes',
+      label: '📝 Скрыть заметки',
+      hint: 'правая панель',
+      keywords: ['collapse', 'notes', 'panel', 'скрыть'],
+      run: () => setNotesCollapsed(true),
+    },
+  ];
   const notebook = useQuery({
     queryKey: ['notebook', notebookId],
     queryFn: async () => {
-      const r = await fetch(`/api/notebooks/${notebookId}`).then((r) => r.json());
-      return r as { id: string; title: string; description?: string };
+      const r = await fetch(`/api/notebooks/${notebookId}`);
+      // Without this check a 404/500 body still parses as JSON and the
+      // query "succeeds", so the "Не удалось загрузить ноутбук" branch
+      // below could never be reached.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return (await r.json()) as { id: string; title: string; description?: string };
     },
   });
 
@@ -109,20 +245,10 @@ export default function NotebookPage() {
     index: number;
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
-
-  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
-
-  const updateLayout = useCallback((patch: Partial<LayoutState>) => {
-    setLayout((prev) => {
-      const next = { ...prev, ...patch };
-      try {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
-      } catch {
-        /* quota — ignore */
-      }
-      return next;
-    });
-  }, []);
+  const [showAudioDialog, setShowAudioDialog] = useState(false);
+  const [showStudioDialog, setShowStudioDialog] = useState(false);
+  const [showDeepResearchDialog, setShowDeepResearchDialog] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
 
   // Live drag — drives both the visible width (via setLayout) and the
   // persisted layout so a reload keeps the user's choice.
@@ -143,6 +269,23 @@ export default function NotebookPage() {
     },
     [layout.notesWidth, layout.notesCollapsed, updateLayout],
   );
+
+  // Mobile swipe between tabs. MUST be declared before any early
+  // return: React requires a stable hook count across renders, and the
+  // loading / error branches below return before the rest of the body.
+  // (Declaring it lower caused "Rendered more hooks than during the
+  // previous render" and blanked the whole page.)
+  const TABS: MobileTab[] = ['sources', 'overview', 'chat', 'artifacts'];
+  const swipeRef = useSwipe<HTMLElement>({
+    onSwipeLeft: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i >= 0 && i < TABS.length - 1) setMobileTab(TABS[i + 1]!);
+    },
+    onSwipeRight: () => {
+      const i = TABS.indexOf(mobileTab);
+      if (i > 0) setMobileTab(TABS[i - 1]!);
+    },
+  });
 
   if (notebook.isLoading) {
     return (
@@ -168,25 +311,81 @@ export default function NotebookPage() {
   const totalCount = sources.data?.sources.length ?? 0;
 
   return (
-    <div className="flex h-screen flex-col">
+    <SourceScopeProvider notebookId={notebookId} sources={sources.data?.sources}>
+      <div className="flex h-screen flex-col bg-canvas">
       {/* ---- Top header ---- */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 md:px-6"
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 min-[640px]:px-6 pt-safe pl-safe pr-safe"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <div className="flex min-w-0 items-center gap-3">
-          <Link to="/" className="flex items-center gap-2 text-muted hover:text-ink transition-colors" title="Все ноутбуки">
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-muted transition-colors hover:text-ink"
+            title="Все ноутбуки"
+          >
             <NotebookLogoMark size={28} />
+            <span className="hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium min-[640px]:inline-flex"
+              style={{ borderColor: 'rgb(var(--nb-border))' }}>
+              <span aria-hidden>←</span>
+              Все ноутбуки
+            </span>
           </Link>
           <div className="min-w-0">
-            <h1 className="truncate text-[17px] font-semibold tracking-tight md:text-[19px]">
+            <h1 className="truncate text-[17px] font-semibold tracking-tight min-[640px]:text-[19px]">
               {notebook.data.title}
             </h1>
-            <p className="hidden text-xs text-muted md:block">
+            <p className="hidden text-xs text-muted min-[640px]:block">
               {readyCount} из {totalCount} источник{ruPlural(totalCount)} готов{readyCount === 1 ? '' : 'ы'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted md:flex">
+          <button
+            type="button"
+            onClick={() => setShowAudioDialog(true)}
+            disabled={readyCount === 0}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink disabled:opacity-50 min-[640px]:inline-flex"
+            title={readyCount === 0 ? 'Сначала добавьте источники' : 'Сгенерировать двухголосый подкаст по источникам'}
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Audio Overview</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowStudioDialog(true)}
+            disabled={readyCount === 0}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink disabled:opacity-50 min-[640px]:inline-flex"
+            title={readyCount === 0 ? 'Сначала добавьте источники' : 'Сгенерировать структурированный отчёт (FAQ, TL;DR, timeline, противоречия)'}
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Studio</span>
+          </button>
+          {/* Кнопка «Deep Research» убрана из шапки: единый визуальный
+              вход теперь — вкладка в SourcesCockpit (Sources Panel).
+              Command Palette (Cmd+K → Deep Research) по-прежнему
+              открывает диалог через setShowDeepResearchDialog ниже. */}
+          <button
+            type="button"
+            onClick={() => setShowShareDialog(true)}
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
+            title="Создать read-only публичную ссылку"
+            data-testid="share-open"
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Поделиться</span>
+          </button>
+          <a
+            href={api.exportUrl(notebookId)}
+            // `download` lets the browser save the file with the
+            // server-provided Content-Disposition filename.
+            // Same min-[640px] breakpoint as the other header chips.
+            className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink min-[640px]:inline-flex"
+            title="Скачать .zip со всеми источниками, артефактами и чатом"
+            data-testid="export-zip"
+          >
+            <SparkleIcon size={12} className="text-accent" />
+            <span>Скачать .zip</span>
+          </a>
+          <div className="hidden items-center gap-1.5 rounded-full bg-surface-tint px-2.5 py-1 text-xs text-muted min-[640px]:flex">
             <SparkleIcon size={12} className="text-accent" />
             <span>AI-ассистент</span>
           </div>
@@ -197,11 +396,31 @@ export default function NotebookPage() {
           >
             {theme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
+          <button
+            type="button"
+            onClick={() =>
+              updateLayout({
+                mode: layout.mode === 'threeColumn' ? 'notebooklm' : 'threeColumn',
+              })
+            }
+            className="btn-icon"
+            title={
+              layout.mode === 'threeColumn'
+                ? 'Переключить в NotebookLM-стиль (горизонтальные источники сверху)'
+                : 'Вернуть трёхколонный layout'
+            }
+          >
+            {layout.mode === 'threeColumn' ? '⇆' : '☰'}
+          </button>
         </div>
       </header>
 
-      {/* ---- Mobile tabs ---- */}
-      <nav className="flex shrink-0 gap-1 border-b px-2 py-2 md:hidden"
+      {/* ---- Compact-layout tabs ----
+          A 640px cutoff is intentional: a split desktop window can be about
+          744 CSS px wide, which is enough for Sources + Chat with notes
+          collapsed. Tailwind's default md cutoff (768px) made that desktop
+          window look like an unfinished mobile screen. */}
+      <nav className="flex shrink-0 items-center gap-1 border-b px-2 py-2 min-[640px]:hidden"
         style={{ borderColor: 'rgb(var(--nb-border))' }}>
         <MobileTabBtn active={mobileTab === 'sources'} onClick={() => setMobileTab('sources')}>
           Источники
@@ -220,9 +439,54 @@ export default function NotebookPage() {
         <MobileTabBtn active={mobileTab === 'artifacts'} onClick={() => setMobileTab('artifacts')}>
           Заметки
         </MobileTabBtn>
+        {/* Page indicator — four dots, the active one filled.
+            Screen readers expose each dot as a labelled "Tab N of 4". */}
+        <div
+          className="ml-auto flex items-center gap-1.5"
+          aria-label={`Вкладка ${TABS.indexOf(mobileTab) + 1} из ${TABS.length}`}
+          data-testid="mobile-tab-indicator"
+        >
+          {TABS.map((t) => (
+            <span
+              key={t}
+              className={
+                'h-1.5 rounded-full transition-all ' +
+                (t === mobileTab
+                  ? 'w-4 bg-accent'
+                  : 'w-1.5 bg-muted/40')
+              }
+              aria-hidden
+            />
+          ))}
+        </div>
       </nav>
 
+      {/* ---- NotebookLM-style layout: horizontal source strip + chat ---- */}
+      {layout.mode === 'notebooklm' && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <SourcesStrip notebookId={notebookId} />
+          {/* One ChatPanel, edge to edge — no card inside the column. */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <PanelErrorBoundary panel="Чат">
+              <ChatPanel
+                notebookId={notebookId}
+                onSaveArtifact={(question, answer, citations) => {
+                  // Make sure the user actually sees the note we're about
+                  // to create — "save to notes" with the panel collapsed
+                  // used to be a silent no-op from the user's point of
+                  // view.
+                  if (layout.notesCollapsed) setNotesCollapsed(false);
+                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
+                }}
+                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
+              />
+            </PanelErrorBoundary>
+          </div>
+        </div>
+      )}
+
       {/* ---- Three-column layout (resizable + collapsible) ---- */}
+      {layout.mode === 'threeColumn' && (
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* LEFT — Sources (or collapsed rail) */}
         {layout.sourcesCollapsed ? (
@@ -234,15 +498,15 @@ export default function NotebookPage() {
           />
         ) : (
           <aside
-            className="hidden min-w-0 shrink-0 overflow-hidden md:block"
-            style={{ width: layout.sourcesWidth, borderRight: '1px solid rgb(var(--nb-border))' }}
+            className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
+            style={{ width: layout.sourcesWidth }}
           >
             <SourcesPanel notebookId={notebookId} />
           </aside>
         )}
 
         {/* Resizer between Sources and Chat (only when both visible) */}
-        <div className="hidden md:flex">
+        <div className="hidden min-[640px]:flex">
           {!layout.sourcesCollapsed && (
             <ResizableDivider
               side="left"
@@ -254,49 +518,65 @@ export default function NotebookPage() {
         </div>
 
         {/* CENTER */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-3 md:gap-5 md:p-6">
-          <div className={mobileTab === 'sources' ? '' : 'hidden'}>
+        <main
+          ref={swipeRef}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas"
+          data-testid="notebook-center"
+        >
+          {/* Mobile-only tabs. These keep the page padding because they
+              are self-contained cards; the chat does not, because it is
+              the column itself. */}
+          <div className={mobileTab === 'sources' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             <div className="card overflow-hidden">
               <SourcesPanel notebookId={notebookId} />
             </div>
           </div>
 
-          <div className={mobileTab === 'overview' ? '' : 'hidden md:block'}>
+          {/* Mobile-only overview tab. Desktop renders the summary inside
+              ChatPanel as a pinned first message (see SummaryCard) so the
+              central column stays a single scrolling conversation. */}
+          <div className={mobileTab === 'overview' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             {hasReadySources ? (
-              <SummaryPanel
-                notebookId={notebookId}
-                onOpenSource={(chunk, index) => setOpenCitation({ chunk, index })}
-              />
+              <PanelErrorBoundary panel="Краткий обзор">
+                <SummaryPanel
+                  notebookId={notebookId}
+                  onOpenSource={(chunk, index) => setOpenCitation({ chunk, index })}
+                />
+              </PanelErrorBoundary>
             ) : (
               <EmptyCentreState hasAnySources={hasSources} />
             )}
           </div>
 
-          <div className={mobileTab === 'chat' ? 'flex flex-1 bg-canvas' : 'hidden md:flex md:flex-1'}>
-            {/* Mobile: edge-to-edge, no card wrapper.
-                Desktop: card wrapper so the chat has a defined panel boundary. */}
-            <div className="hidden md:flex md:min-h-[460px] md:w-full md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:bg-surface md:shadow-soft"
-              style={{ borderColor: 'rgb(var(--nb-border))' }}>
+          {/* Chat — a single instance for every breakpoint, edge to edge.
+              It used to be two (a carded desktop copy plus an
+              edge-to-edge mobile copy), which mounted two live ChatPanels
+              and drew a frame inside the column: a window inside the
+              window. */}
+          <div
+            className={
+              mobileTab === 'chat'
+                ? 'flex min-h-0 flex-1'
+                : 'hidden min-[640px]:flex min-[640px]:min-h-0 min-[640px]:flex-1'
+            }
+          >
+            <PanelErrorBoundary panel="Чат">
               <ChatPanel
                 notebookId={notebookId}
                 onSaveArtifact={(question, answer, citations) => {
+                  // Make sure the user actually sees the note we're about
+                  // to create — "save to notes" with the panel collapsed
+                  // used to be a silent no-op from the user's point of
+                  // view.
+                  if (layout.notesCollapsed) setNotesCollapsed(false);
                   setPrefilled(buildArtifactMarkdown(question, answer, citations));
                 }}
                 onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
               />
-            </div>
-            <div className="flex w-full flex-1 md:hidden">
-              <ChatPanel
-                notebookId={notebookId}
-                onSaveArtifact={(question, answer, citations) => {
-                  setPrefilled(buildArtifactMarkdown(question, answer, citations));
-                }}
-                onOpenCitation={(chunk, index) => setOpenCitation({ chunk, index })}
-              />
-            </div>
+            </PanelErrorBoundary>
           </div>
 
-          <div className={mobileTab === 'artifacts' ? '' : 'hidden'}>
+          <div className={mobileTab === 'artifacts' ? 'min-[640px]:hidden p-3' : 'hidden'}>
             <ArtifactsPanel
               notebookId={notebookId}
               prefilled={prefilled}
@@ -306,12 +586,12 @@ export default function NotebookPage() {
         </main>
 
         {/* Resizer between Chat and Notes */}
-        <div className="hidden md:flex">
+        <div className="hidden min-[640px]:flex">
           {!layout.notesCollapsed && (
             <ResizableDivider
               side="right"
               collapsed={layout.notesCollapsed}
-              onToggleCollapse={() => updateLayout({ notesCollapsed: true })}
+              onToggleCollapse={() => setNotesCollapsed(true)}
               onResize={onResizeRight}
             />
           )}
@@ -321,14 +601,15 @@ export default function NotebookPage() {
         {layout.notesCollapsed ? (
           <CollapsedRail
             side="right"
-            onExpand={() => updateLayout({ notesCollapsed: false })}
+            onExpand={() => setNotesCollapsed(false)}
             label="Заметки"
             icon={<PanelRightIcon size={16} />}
           />
         ) : (
           <aside
-            className="hidden min-w-0 shrink-0 overflow-hidden md:block"
-            style={{ width: layout.notesWidth, borderLeft: '1px solid rgb(var(--nb-border))' }}
+            className="hidden min-w-0 shrink-0 overflow-hidden min-[640px]:block"
+            style={{ width: layout.notesWidth }}
+            data-testid="notes-panel"
           >
             <ArtifactsPanel
               notebookId={notebookId}
@@ -338,15 +619,71 @@ export default function NotebookPage() {
           </aside>
         )}
       </div>
+      )}
 
-      {openCitation && (
-        <CitationDialog
-          chunk={openCitation.chunk}
-          index={openCitation.index}
-          onClose={() => setOpenCitation(null)}
+      {openCitation && (() => {
+        // "Фрагмент N" — open the source reader with the matching chunk
+        // highlighted + scrolled into view. Anything else falls back to
+        // the legacy dialog (kept for very small screens).
+        const m = /Фрагмент\s+(\d+)/.exec(openCitation.chunk.location ?? '');
+        if (m) {
+          return (
+            <SourceDetailSheet
+              source={{
+                id: openCitation.chunk.sourceId,
+                notebookId,
+                kind: openCitation.chunk.sourceKind,
+                title: openCitation.chunk.sourceTitle,
+                url: null,
+                status: 'ready',
+                error: null,
+                createdAt: '',
+                summary: null,
+                summaryTopics: null,
+                summarizedAt: null,
+              }}
+              highlightOrdinal={Number(m[1]) - 1}
+              onClose={() => setOpenCitation(null)}
+            />
+          );
+        }
+        return (
+          <CitationDialog
+            chunk={openCitation.chunk}
+            index={openCitation.index}
+            onClose={() => setOpenCitation(null)}
+          />
+        );
+      })()}
+
+      <CommandPalette open={paletteOpen} onClose={() => closePalette(false)} commands={commands} />
+      {showAudioDialog && (
+        <AudioOverviewDialog
+          notebookId={notebookId}
+          onClose={() => setShowAudioDialog(false)}
+        />
+      )}
+      {showStudioDialog && (
+        <StudioReportDialog
+          notebookId={notebookId}
+          onClose={() => setShowStudioDialog(false)}
+        />
+      )}
+      {showDeepResearchDialog && (
+        <DeepResearchDialog
+          notebookId={notebookId}
+          onClose={() => setShowDeepResearchDialog(false)}
+          onCreated={() => setMobileTab('artifacts')}
+        />
+      )}
+      {showShareDialog && (
+        <ShareDialog
+          notebookId={notebookId}
+          onClose={() => setShowShareDialog(false)}
         />
       )}
     </div>
+    </SourceScopeProvider>
   );
 }
 

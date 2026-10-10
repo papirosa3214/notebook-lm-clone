@@ -4,19 +4,21 @@ import { api } from '../lib/api';
 import type {
   IngestProgressDelta,
   IngestStage,
-  SearchPreviewResult,
   Source,
   SourceKind,
 } from '../lib/types';
+import { SourceDetailSheet } from './SourceDetailSheet';
+import { useSourceScopeContext } from '../lib/sourceScopeContext';
+import { isSourceInScope } from '../lib/useSourceScope';
+import { AddSourcesHubDialog, type HubTab } from './AddSourcesHubDialog';
 import {
   SourceIcon,
   PlusIcon,
   SearchIcon,
   RefreshIcon,
+  SendIcon,
   CloseIcon,
   TrashIcon,
-  SparkleIcon,
-  ChevronDownIcon,
 } from './icons/NotebookLogo';
 
 interface Props {
@@ -29,14 +31,6 @@ const KIND_LABEL: Record<SourceKind, string> = {
   youtube: 'YouTube',
 };
 
-const STAGE_LABEL: Record<IngestStage, string> = {
-  fetching: 'Загружаю страницу',
-  extracting: 'Извлекаю текст',
-  chunking: 'Разбиваю на чанки',
-  embedding: 'Создаю embeddings',
-  storing: 'Сохраняю',
-};
-
 const STAGE_ORDER: IngestStage[] = [
   'fetching',
   'extracting',
@@ -45,12 +39,31 @@ const STAGE_ORDER: IngestStage[] = [
   'storing',
 ];
 
+const STAGE_LABEL: Record<IngestStage, string> = {
+  fetching: 'Загружаю страницу',
+  extracting: 'Извлекаю текст',
+  chunking: 'Разбиваю на чанки',
+  embedding: 'Создаю embeddings',
+  storing: 'Сохраняю',
+};
+
 export function SourcesPanel({ notebookId }: Props) {
   const qc = useQueryClient();
   const sources = useQuery({
     queryKey: ['sources', notebookId],
     queryFn: () => api.listSources(notebookId),
   });
+
+  const [openSource, setOpenSource] = useState<Source | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
+
+  // Hub Modal state
+  const [showHub, setShowHub] = useState(false);
+  const [hubTab, setHubTab] = useState<HubTab>('files');
+  const [hubValue, setHubValue] = useState('');
+
+  // Local filter for sources list
+  const [filterQuery, setFilterQuery] = useState('');
 
   const refresh = useMutation({
     mutationFn: () => api.refreshSources(notebookId),
@@ -62,46 +75,93 @@ export function SourcesPanel({ notebookId }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sources', notebookId] }),
   });
 
-  const [showAddUrl, setShowAddUrl] = useState(false);
-  const [showAddYt, setShowAddYt] = useState(false);
-  const [showAddFile, setShowAddFile] = useState(false);
-  const [showAddSearch, setShowAddSearch] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
-
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
+
+  let scope: ReturnType<typeof useSourceScopeContext> | null = null;
+  try {
+    scope = useSourceScopeContext();
+  } catch {
+    scope = null;
+  }
+  const selectedIds = scope?.selectedIds ?? [];
+  const isScoped = scope?.isScoped ?? false;
+
+  const filteredSources = (sources.data?.sources ?? []).filter((s) => {
+    if (!filterQuery.trim()) return true;
+    const q = filterQuery.toLowerCase();
+    return (
+      s.title.toLowerCase().includes(q) ||
+      (s.url && s.url.toLowerCase().includes(q)) ||
+      (s.summary && s.summary.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="flex h-full flex-col bg-canvas">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h2 className="text-[13px] font-semibold tracking-tight text-ink">
-          Источники
+        <h2 className="text-[13px] font-semibold tracking-tight text-ink flex items-center gap-1.5">
+          <span>Источники</span>
           {totalCount > 0 && (
-            <span className="ml-1.5 text-xs font-normal text-muted">
-              {readyCount}/{totalCount}
+            <span className="text-xs font-normal text-muted">
+              {isScoped
+                ? `(${selectedIds.length} из ${readyCount})`
+                : `(${readyCount}/${totalCount})`}
             </span>
           )}
         </h2>
+        <div className="flex items-center gap-1">
+          {scope && scope.hasReady && isScoped && (
+            <button
+              type="button"
+              onClick={() => scope.selectAll()}
+              className="rounded-full px-2 py-1 text-[11px] font-medium text-muted hover:text-ink hover:bg-surface-tint"
+              title="Сбросить выбор — выбрать все готовые источники"
+            >
+              Все
+            </button>
+          )}
+          <button
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            className="btn-icon"
+            title="Обновить список"
+          >
+            <RefreshIcon size={14} className={refresh.isPending ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* Main Add Sources Button */}
+      <div className="px-4 pt-1 pb-2.5">
         <button
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending}
-          className="btn-icon"
-          title="Обновить список"
+          type="button"
+          onClick={() => {
+            setHubTab('files');
+            setHubValue('');
+            setShowHub(true);
+          }}
+          className="btn btn-primary w-full shadow-sm flex items-center justify-center gap-2 py-2.5 text-xs font-semibold"
+          data-testid="open-add-sources-hub"
         >
-          <RefreshIcon size={14} className={refresh.isPending ? 'animate-spin' : ''} />
+          <PlusIcon size={15} />
+          <span>Добавить источники</span>
         </button>
       </div>
 
-      {/* Add source — 4 circular buttons in a row, like NotebookLM */}
-      <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
-        <AddCircle label="URL" onClick={() => setShowAddUrl(true)} kind="url" />
-        <AddCircle label="YouTube" onClick={() => setShowAddYt(true)} kind="youtube" />
-        <AddCircle label="Файл" onClick={() => setShowAddFile(true)} kind="file" />
-        <AddCircle
-          label="Discover"
-          onClick={() => setShowAddSearch(true)}
-          kind="discover"
+      {/* Unified Quick Input Bar */}
+      <div className="px-4 pb-3">
+        <QuickSourceBar
+          notebookId={notebookId}
+          onSourceAdded={() => qc.invalidateQueries({ queryKey: ['sources', notebookId] })}
+          onOpenSearchHub={(q) => {
+            setHubTab('search');
+            setHubValue(q);
+            setShowHub(true);
+          }}
+          filterQuery={filterQuery}
+          onFilterChange={setFilterQuery}
         />
       </div>
 
@@ -114,22 +174,51 @@ export function SourcesPanel({ notebookId }: Props) {
             ))}
           </div>
         )}
+
         {sources.data && sources.data.sources.length === 0 && (
-          <EmptyState onDiscover={() => setShowAddSearch(true)} />
+          <EmptyState onOpenHub={() => setShowHub(true)} />
         )}
+
+        {sources.data && sources.data.sources.length > 0 && filteredSources.length === 0 && (
+          <div className="p-4 text-center text-xs text-muted">
+            Ничего не найдено по запросу «{filterQuery}»
+          </div>
+        )}
+
         <ul className="space-y-2">
-          {sources.data?.sources.map((s) => (
-            <SourceItem key={s.id} source={s} onDelete={() => setPendingDelete(s)} />
+          {filteredSources.map((s) => (
+            <SourceItem
+              key={s.id}
+              source={s}
+              onSelect={() => setOpenSource(s)}
+              onDelete={() => setPendingDelete(s)}
+              selected={
+                scope
+                  ? isSourceInScope(s.id, scope.selectedIds, scope.readyIds)
+                  : true
+              }
+              onToggle={
+                scope && s.status === 'ready'
+                  ? () => scope.toggle(s.id)
+                  : undefined
+              }
+            />
           ))}
         </ul>
       </div>
 
-      {showAddUrl && <AddUrlDialog notebookId={notebookId} onClose={() => setShowAddUrl(false)} />}
-      {showAddYt && <AddYoutubeDialog notebookId={notebookId} onClose={() => setShowAddYt(false)} />}
-      {showAddFile && <AddFileDialog notebookId={notebookId} onClose={() => setShowAddFile(false)} />}
-      {showAddSearch && (
-        <DiscoverDialog notebookId={notebookId} onClose={() => setShowAddSearch(false)} />
+      {/* Add Sources Center Hub Modal */}
+      {showHub && (
+        <AddSourcesHubDialog
+          notebookId={notebookId}
+          initialTab={hubTab}
+          initialValue={hubValue}
+          onClose={() => setShowHub(false)}
+          onSourceAdded={() => qc.invalidateQueries({ queryKey: ['sources', notebookId] })}
+        />
       )}
+
+      {/* Delete confirmation */}
       {pendingDelete && (
         <ConfirmDialog
           title="Удалить источник?"
@@ -143,67 +232,238 @@ export function SourcesPanel({ notebookId }: Props) {
           onClose={() => setPendingDelete(null)}
         />
       )}
+
+      {/* Detail sheet */}
+      {openSource && (
+        <SourceDetailSheet
+          source={openSource}
+          onClose={() => setOpenSource(null)}
+        />
+      )}
     </div>
   );
 }
 
-function AddCircle({
-  label,
-  onClick,
-  kind,
+/** What the single add-source input looks like it contains. */
+export type SourceInputKind = 'youtube' | 'url' | 'query';
+
+/**
+ * Route one piece of user input to the right add-source flow.
+ */
+export function classifySourceInput(raw: string): SourceInputKind {
+  const v = raw.trim();
+  if (!v) return 'query';
+  if (/^[A-Za-z0-9_-]{11}$/.test(v)) return 'youtube';
+
+  let host: string;
+  const hasScheme = /^https?:\/\//i.test(v);
+  try {
+    const u = new URL(hasScheme ? v : `https://${v}`);
+    host = u.hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return 'query';
+  }
+  if (
+    host === 'youtu.be' ||
+    host === 'youtube.com' ||
+    host === 'm.youtube.com' ||
+    host === 'music.youtube.com'
+  ) {
+    return 'youtube';
+  }
+  if (hasScheme) return 'url';
+  if (host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return 'url';
+  if (!host.includes('.')) return 'query';
+  return 'url';
+}
+
+export function normalizeUrlInput(raw: string): string {
+  const v = raw.trim();
+  if (!v) return v;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
+}
+
+/**
+ * Unified smart input bar: auto-detects URL, YouTube or Search query.
+ */
+function QuickSourceBar({
+  notebookId,
+  onSourceAdded,
+  onOpenSearchHub,
+  filterQuery,
+  onFilterChange,
 }: {
-  label: string;
-  onClick: () => void;
-  kind: SourceKind | 'discover';
+  notebookId: string;
+  onSourceAdded: () => void;
+  onOpenSearchHub: (q: string) => void;
+  filterQuery: string;
+  onFilterChange: (q: string) => void;
 }) {
-  const isDiscover = kind === 'discover';
+  const [value, setValue] = useState('');
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+
+  const kind = classifySourceInput(value);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const v = value.trim();
+    if (!v || running) return;
+
+    if (kind === 'query') {
+      onOpenSearchHub(v);
+      return;
+    }
+
+    // It's a URL or YouTube link -> direct fast ingest
+    setRunning(true);
+    setProgress(INITIAL_PROGRESS);
+
+    const stream =
+      kind === 'youtube'
+        ? api.ingestYoutubeSourceStream(notebookId, { url: v }, (delta) =>
+            setProgress((prev) => progressFromDelta(delta, prev)),
+          )
+        : api.ingestUrlSourceStream(
+            notebookId,
+            { url: normalizeUrlInput(v) },
+            (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
+          );
+
+    stream.promise
+      .then(() => {
+        setValue('');
+        onFilterChange('');
+        onSourceAdded();
+        setTimeout(() => {
+          setRunning(false);
+          setProgress(INITIAL_PROGRESS);
+        }, 1200);
+      })
+      .catch((err: Error) => {
+        setRunning(false);
+        setProgress((p) => ({ ...p, error: err.message }));
+      });
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex items-center gap-1.5 rounded-full border bg-surface py-1.5 pl-1.5 pr-3.5 text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-soft"
-      style={{
-        borderColor: 'rgb(var(--nb-border))',
-        color: 'rgb(var(--nb-ink))',
-      }}
-      title={`Добавить ${label.toLowerCase()}`}
-    >
-      <span
-        className="flex h-6 w-6 items-center justify-center rounded-full text-white"
-        style={{
-          backgroundColor: isDiscover ? 'rgb(var(--nb-ai-glow))' : 'rgb(var(--nb-accent))',
-        }}
-      >
-        {isDiscover ? (
-          <SparkleIcon size={11} />
-        ) : (
-          <SourceIcon kind={kind as SourceKind} size={12} />
-        )}
-      </span>
-      <span className="leading-none">{label}</span>
-    </button>
+    <div className="space-y-2">
+      <form onSubmit={handleSubmit}>
+        <div
+          className="flex items-center gap-1.5 rounded-2xl border bg-surface px-3 py-1 transition-all focus-within:border-accent focus-within:shadow-sm"
+          style={{ borderColor: 'rgb(var(--nb-border))' }}
+        >
+          <span className="shrink-0 text-muted" aria-hidden>
+            {kind === 'youtube' ? '📺' : kind === 'url' ? '🔗' : '🔍'}
+          </span>
+          <input
+            className="min-w-0 flex-1 bg-transparent py-1.5 text-xs text-ink outline-none placeholder:text-muted"
+            placeholder="Вставьте ссылку или поисковый запрос…"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              // Only filter list if user is typing text search, not a URL
+              if (classifySourceInput(e.target.value) === 'query') {
+                onFilterChange(e.target.value);
+              } else {
+                onFilterChange('');
+              }
+            }}
+            disabled={running}
+            data-testid="add-source-input"
+            aria-label="Вставьте ссылку или поисковый запрос"
+          />
+          {value.trim() && (
+            <button
+              type="button"
+              onClick={() => {
+                setValue('');
+                onFilterChange('');
+              }}
+              className="rounded-full p-1 text-muted hover:text-ink"
+              title="Очистить"
+            >
+              <CloseIcon size={12} />
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={!value.trim() || running}
+            className="shrink-0 rounded-full p-1.5 text-accent transition-colors hover:bg-surface-tint disabled:opacity-40"
+            title={kind === 'query' ? 'Искать в вебе' : 'Добавить ссылку'}
+            data-testid="add-source-submit"
+          >
+            {kind === 'query' ? <SearchIcon size={14} /> : <SendIcon size={14} />}
+          </button>
+        </div>
+      </form>
+
+      {/* Live compact progress if URL is being ingested directly */}
+      {(running || progress.error || (progress.stage && progress.ratio < 1)) && (
+        <div
+          className="rounded-xl border p-2.5 text-xs bg-surface-tint/50 space-y-1.5 animate-fade-in"
+          style={{ borderColor: 'rgb(var(--nb-border))' }}
+        >
+          <div className="flex items-center justify-between text-[11px] text-muted">
+            <span className="truncate font-medium text-ink">
+              {progress.error ? '✗ Ошибка' : progress.message || 'Импорт…'}
+            </span>
+            {!progress.error && (
+              <span className="font-semibold text-accent">{Math.round(progress.ratio * 100)}%</span>
+            )}
+          </div>
+          <div className="h-1 overflow-hidden rounded-full bg-surface">
+            <div
+              className={`h-full transition-all duration-300 ${
+                progress.error ? 'bg-red-500' : 'bg-accent'
+              }`}
+              style={{ width: `${Math.round(progress.ratio * 100)}%` }}
+            />
+          </div>
+          {progress.error && (
+            <p className="text-[10px] text-red-600 mt-1">{progress.error}</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
-function EmptyState({ onDiscover }: { onDiscover: () => void }) {
+function EmptyState({ onOpenHub }: { onOpenHub: () => void }) {
   return (
-    <div className="empty-card mt-2">
-      <span className="text-3xl" aria-hidden>
+    <div className="mt-8 px-4 text-center">
+      <span className="text-3xl mb-2 inline-block opacity-80" aria-hidden>
         📚
       </span>
-      <p className="text-sm font-medium">Пока нет источников</p>
-      <p className="max-w-xs text-xs text-muted">
-        Добавьте URL, YouTube-видео или файл. Или попросите Notebook найти источники по теме.
+      <p className="text-sm font-semibold text-ink">Пока нет источников</p>
+      <p className="max-w-xs mx-auto text-xs text-muted mt-1.5 leading-relaxed">
+        Вставьте ссылку в поле выше или нажмите кнопку «Добавить источники», чтобы загрузить файлы, видео или провести исследование.
       </p>
-      <button className="btn btn-primary mt-2 text-xs" onClick={onDiscover}>
-        <SearchIcon size={12} />
-        Discover
+      <button
+        type="button"
+        onClick={onOpenHub}
+        className="btn btn-secondary text-xs mt-4"
+      >
+        <PlusIcon size={13} />
+        Открыть центр источников
       </button>
     </div>
   );
 }
 
-function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => void }) {
+function SourceItem({
+  source: s,
+  onSelect,
+  onDelete,
+  selected,
+  onToggle,
+}: {
+  source: Source;
+  onSelect: () => void;
+  onDelete: () => void;
+  selected: boolean;
+  onToggle?: () => void;
+}) {
   const statusBadge = {
     pending: { text: '⏳', cls: 'bg-surface-tint text-muted' },
     parsing: {
@@ -214,46 +474,98 @@ function SourceItem({ source: s, onDelete }: { source: Source; onDelete: () => v
       text: 'готово',
       cls: 'bg-[#D1FAE5] text-[#065F46] dark:bg-[#064E3B]/50 dark:text-[#6EE7B7]',
     },
-    failed: { text: 'ошибка', cls: 'bg-[#FEE2E2] text-[#991B1B] dark:bg-[#7F1D1D]/40 dark:text-[#FCA5A5]' },
+    failed: {
+      text: 'ошибка',
+      cls: 'bg-[#FEE2E2] text-[#991B1B] dark:bg-[#7F1D1D]/40 dark:text-[#FCA5A5]',
+    },
   }[s.status];
+
   return (
-    <li className="source-pill group">
-      <span className="kind-pill" title={KIND_LABEL[s.kind]}>
-        <SourceIcon kind={s.kind} size={14} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium" title={s.title}>
-          {s.title}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge.cls}`}
-          >
-            {statusBadge.text}
-          </span>
-          {s.url && (
-            <a
-              href={s.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="truncate text-[10px] text-muted hover:text-accent hover:underline"
-              title={s.url}
+    <li className="group flex items-center gap-2 p-2 rounded-xl transition-all hover:bg-surface-tint/60">
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors"
+          style={{
+            backgroundColor: selected ? 'rgb(var(--nb-accent))' : 'transparent',
+            borderColor: selected ? 'rgb(var(--nb-accent))' : 'rgb(var(--nb-border))',
+            color: 'white',
+          }}
+          aria-label={selected ? 'Исключить из контекста чата' : 'Включить в контекст чата'}
+          title={selected ? 'Исключить из контекста чата' : 'Включить в контекст чата'}
+        >
+          {selected && (
+            <svg width="10" height="10" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+              <path
+                d="M2 5.5L4.5 8L9 3"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+        </button>
+      ) : (
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-dashed text-[9px] text-muted"
+          title="Этот источник ещё не готов"
+        >
+          —
+        </span>
+      )}
+
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        title="Открыть краткое содержание"
+      >
+        <span className="kind-pill shrink-0" title={KIND_LABEL[s.kind]}>
+          <SourceIcon kind={s.kind} size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium text-ink" title={s.title}>
+            {s.title}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium ${statusBadge.cls}`}
             >
-              {prettyHost(s.url)}
-            </a>
+              {statusBadge.text}
+            </span>
+            {s.url && (
+              <span className="truncate text-[10px] text-muted" title={s.url}>
+                {prettyHost(s.url)}
+              </span>
+            )}
+          </div>
+          {s.summary && (
+            <div className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-muted">
+              {s.summary}
+            </div>
+          )}
+          {s.error && (
+            <div className="mt-0.5 truncate text-[10px] text-red-600" title={s.error}>
+              {s.error}
+            </div>
           )}
         </div>
-        {s.error && (
-          <div className="mt-1 truncate text-[10px] text-red-600" title={s.error}>
-            {s.error}
-          </div>
-        )}
-      </div>
+      </button>
+
       <button
-        onClick={onDelete}
-        className="btn-icon opacity-0 transition-opacity group-hover:opacity-100"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="btn-icon opacity-0 transition-opacity group-hover:opacity-100 shrink-0"
         title="Удалить источник"
         style={{ color: 'rgb(var(--nb-muted))' }}
+        type="button"
       >
         <TrashIcon size={13} />
       </button>
@@ -269,10 +581,6 @@ function prettyHost(url: string): string {
   }
 }
 
-// ============================================================
-// ProgressStepper — shared UI for live ingest progress
-// ============================================================
-
 interface ProgressState {
   stage: IngestStage | null;
   ratio: number;
@@ -286,66 +594,12 @@ const INITIAL_PROGRESS: ProgressState = {
   message: '',
 };
 
-function ProgressStepper({ progress }: { progress: ProgressState }) {
-  const currentIndex = progress.stage
-    ? STAGE_ORDER.indexOf(progress.stage)
-    : -1;
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs text-muted">
-        <span>{progress.error ? '✗ ошибка' : progress.message || 'Готовлюсь…'}</span>
-        {!progress.error && <span className="font-semibold">{Math.round(progress.ratio * 100)}%</span>}
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-tint">
-        <div
-          className={`h-full transition-all duration-300 ${
-            progress.error ? 'bg-red-500' : ''
-          }`}
-          style={{
-            width: `${Math.round(progress.ratio * 100)}%`,
-            backgroundColor: progress.error ? undefined : 'rgb(var(--nb-accent))',
-          }}
-        />
-      </div>
-      <ol className="space-y-1.5 text-xs">
-        {STAGE_ORDER.map((stage, i) => {
-          const done = currentIndex > i || progress.ratio >= 1;
-          const active = currentIndex === i && !progress.error;
-          return (
-            <li
-              key={stage}
-              className={`flex items-center gap-2 ${
-                done
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : active
-                    ? 'font-medium text-accent'
-                    : 'text-subtle'
-              }`}
-            >
-              <span className="w-4 text-center">
-                {done ? '✓' : active ? '●' : '○'}
-              </span>
-              <span>{STAGE_LABEL[stage]}</span>
-            </li>
-          );
-        })}
-      </ol>
-      {progress.error && (
-        <p className="rounded-xl border bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300"
-          style={{ borderColor: 'rgb(252 165 165 / 0.5)' }}>
-          {progress.error}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function progressFromDelta(delta: IngestProgressDelta, prev: ProgressState): ProgressState {
   if (delta.type === 'progress') {
     const stageIdx = STAGE_ORDER.indexOf(delta.stage);
     const base = stageIdx >= 0 ? stageIdx / STAGE_ORDER.length : 0;
     const intra = delta.ratio ?? 0.5;
-    const ratio = Math.min(0.99, base + (intra / STAGE_ORDER.length));
+    const ratio = Math.min(0.99, base + intra / STAGE_ORDER.length);
     return {
       stage: delta.stage,
       ratio,
@@ -357,10 +611,6 @@ function progressFromDelta(delta: IngestProgressDelta, prev: ProgressState): Pro
   }
   return { stage: prev.stage, ratio: 1, message: 'Готово' };
 }
-
-// ============================================================
-// Confirm dialog (generic)
-// ============================================================
 
 function ConfirmDialog({
   title,
@@ -380,461 +630,32 @@ function ConfirmDialog({
   onClose: () => void;
 }) {
   return (
-    <Dialog title={title} onClose={onClose}>
-      <p className="text-sm text-muted">{message}</p>
-      <div className="mt-5 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="btn btn-secondary">
-          {cancelLabel}
-        </button>
-        <button
-          type="button"
-          onClick={onConfirm}
-          className={danger ? 'btn !bg-[#DC2626] !text-white hover:!bg-[#B91C1C]' : 'btn btn-primary'}
-        >
-          {confirmLabel}
-        </button>
-      </div>
-    </Dialog>
-  );
-}
-
-// ============================================================
-// Add URL — streams progress
-// ============================================================
-
-function AddUrlDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
-  const [running, setRunning] = useState(false);
-
-  function start() {
-    if (!url || running) return;
-    setRunning(true);
-    setProgress(INITIAL_PROGRESS);
-    const stream = api.ingestUrlSourceStream(
-      notebookId,
-      { url, title: title || undefined },
-      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
-    );
-    stream.promise
-      .then(() => {
-        qc.invalidateQueries({ queryKey: ['sources', notebookId] });
-        onClose();
-      })
-      .catch((err: Error) => setProgress((p) => ({ ...p, error: err.message })))
-      .finally(() => setRunning(false));
-  }
-
-  return (
-    <Dialog title="Добавить URL" onClose={onClose}>
-      {!running && progress.error === undefined && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            start();
-          }}
-          className="space-y-3"
-        >
-          <div>
-            <label className="section-label mb-1.5 block">URL</label>
-            <input
-              className="input"
-              placeholder="https://…"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              autoFocus
-              required
-            />
-          </div>
-          <div>
-            <label className="section-label mb-1.5 block">Название (опционально)</label>
-            <input
-              className="input"
-              placeholder="Например: RAG Wikipedia"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Отмена
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={!url}>
-              <PlusIcon size={13} />
-              Добавить
-            </button>
-          </div>
-        </form>
-      )}
-      {(running || progress.error) && <ProgressStepper progress={progress} />}
-      {progress.error && (
-        <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="btn btn-secondary">
-            Закрыть
-          </button>
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-// ============================================================
-// Add YouTube — streams progress
-// ============================================================
-
-function AddYoutubeDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
-  const [running, setRunning] = useState(false);
-
-  function start() {
-    if (!url || running) return;
-    setRunning(true);
-    setProgress(INITIAL_PROGRESS);
-    const stream = api.ingestYoutubeSourceStream(
-      notebookId,
-      { url, title: title || undefined },
-      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
-    );
-    stream.promise
-      .then(() => {
-        qc.invalidateQueries({ queryKey: ['sources', notebookId] });
-        onClose();
-      })
-      .catch((err: Error) => setProgress((p) => ({ ...p, error: err.message })))
-      .finally(() => setRunning(false));
-  }
-
-  return (
-    <Dialog title="Добавить YouTube" onClose={onClose}>
-      {!running && !progress.error && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            start();
-          }}
-          className="space-y-3"
-        >
-          <div>
-            <label className="section-label mb-1.5 block">URL или ID видео</label>
-            <input
-              className="input"
-              placeholder="https://youtube.com/watch?v=…"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              autoFocus
-              required
-            />
-          </div>
-          <div>
-            <label className="section-label mb-1.5 block">Название (опционально)</label>
-            <input
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Отмена
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={!url}>
-              <PlusIcon size={13} />
-              Добавить
-            </button>
-          </div>
-        </form>
-      )}
-      {(running || progress.error) && <ProgressStepper progress={progress} />}
-      {progress.error && (
-        <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="btn btn-secondary">
-            Закрыть
-          </button>
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-// ============================================================
-// Discover — streams progress per URL
-// ============================================================
-
-function DiscoverDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [stepName, setStepName] = useState<'query' | 'preview' | 'ingest'>('query');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchPreviewResult[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
-
-  const previewMutation = useMutation({
-    mutationFn: () => api.searchPreview(notebookId, query, 8),
-    onSuccess: (data) => {
-      setResults(data.results);
-      setSelected(new Set(data.results.slice(0, 3).map((r) => r.url)));
-      setStepName('preview');
-    },
-  });
-
-  function startIngest() {
-    if (selected.size === 0) return;
-    setStepName('ingest');
-    setProgress(INITIAL_PROGRESS);
-    const stream = api.ingestSearchAddBatchStream(
-      notebookId,
-      { urls: Array.from(selected) },
-      (delta) => setProgress((prev) => progressFromDelta(delta, prev)),
-    );
-    stream.promise
-      .then(() => {
-        qc.invalidateQueries({ queryKey: ['sources', notebookId] });
-        onClose();
-      })
-      .catch((err: Error) => setProgress((p) => ({ ...p, error: err.message })));
-  }
-
-  function toggle(url: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(url)) next.delete(url);
-      else next.add(url);
-      return next;
-    });
-  }
-
-  return (
-    <Dialog title="Discover — найти источники" onClose={onClose}>
-      {stepName === 'query' && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (query.trim()) previewMutation.mutate();
-          }}
-          className="space-y-3"
-        >
-          <div>
-            <label className="section-label mb-1.5 block">Тема</label>
-            <input
-              className="input"
-              placeholder="например: retrieval augmented generation"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              autoFocus
-              required
-            />
-            <p className="mt-1.5 text-xs text-subtle">
-              Поиск через DuckDuckGo, без ключей. На втором шаге можно выбрать результаты.
-            </p>
-          </div>
-          {previewMutation.isError && (
-            <p className="text-xs text-red-600">
-              {(previewMutation.error as Error).message}
-            </p>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Отмена
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!query.trim() || previewMutation.isPending}
-            >
-              {previewMutation.isPending ? 'Ищу…' : 'Найти'}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {stepName === 'preview' && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs text-muted">
-              Найдено {results.length} · выбрано {selected.size}
-            </div>
-            <div className="flex gap-1">
-              <button type="button" onClick={() => setSelected(new Set(results.map((r) => r.url)))} className="btn btn-ghost text-xs">
-                Все
-              </button>
-              <button type="button" onClick={() => setSelected(new Set())} className="btn btn-ghost text-xs">
-                Снять
-              </button>
-            </div>
-          </div>
-
-          <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
-            {results.map((r) => (
-              <li key={r.url}>
-                <label
-                  className={`flex cursor-pointer gap-3 rounded-2xl border bg-surface p-3 transition-all ${
-                    selected.has(r.url) ? 'border-accent bg-accent-soft/40' : ''
-                  }`}
-                  style={{
-                    borderColor: selected.has(r.url)
-                      ? 'rgb(var(--nb-accent))'
-                      : 'rgb(var(--nb-border))',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-1 h-4 w-4 shrink-0"
-                    style={{ accentColor: 'rgb(var(--nb-accent))' }}
-                    checked={selected.has(r.url)}
-                    onChange={() => toggle(r.url)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium" title={r.title}>
-                      {r.title}
-                    </div>
-                    <div className="truncate text-xs text-muted" title={r.url}>
-                      {prettyHost(r.url)}
-                    </div>
-                    {r.snippet && (
-                      <div className="mt-1 line-clamp-2 text-xs text-muted">
-                        {r.snippet}
-                      </div>
-                    )}
-                  </div>
-                </label>
-              </li>
-            ))}
-          </ul>
-
-          <p className="text-xs text-muted">
-            Будет загружено {selected.size} источник{russianPlural(selected.size)}. Это займёт
-            ~{selected.size * 4} сек.
-          </p>
-          <div className="flex justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setStepName('query');
-                setResults([]);
-                setSelected(new Set());
-              }}
-              className="btn btn-secondary"
-            >
-              ← Назад
-            </button>
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="btn btn-secondary">
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={startIngest}
-                disabled={selected.size === 0}
-                className="btn btn-primary"
-              >
-                Добавить {selected.size}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {stepName === 'ingest' && (
-        <div className="space-y-3">
-          <ProgressStepper progress={progress} />
-          {progress.error && (
-            <div className="flex justify-end">
-              <button type="button" onClick={onClose} className="btn btn-secondary">
-                Закрыть
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-// ============================================================
-// Add file — multipart doesn't stream; show a flat spinner
-// ============================================================
-
-function AddFileDialog({ notebookId, onClose }: { notebookId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
-  const upload = useMutation({
-    mutationFn: () => {
-      if (!file) throw new Error('no file');
-      return api.uploadFileSource(notebookId, file);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sources', notebookId] });
-      onClose();
-    },
-  });
-  return (
-    <Dialog title="Загрузить файл" onClose={onClose}>
-      <div className="space-y-3">
-        <input
-          type="file"
-          accept=".pdf,.docx,.txt,.md,.markdown,.text"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm"
-        />
-        {file && (
-          <p className="text-xs text-muted">
-            {file.name} ({Math.round(file.size / 1024)} KB)
-          </p>
-        )}
-        {upload.isError && <p className="text-xs text-red-600">{String(upload.error)}</p>}
-        <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="btn btn-secondary">
-            Отмена
-          </button>
-          <button
-            onClick={() => upload.mutate()}
-            className="btn btn-primary"
-            disabled={!file || upload.isPending}
-          >
-            {upload.isPending ? 'Загружаю…' : 'Загрузить'}
-          </button>
-        </div>
-      </div>
-    </Dialog>
-  );
-}
-
-function russianPlural(n: number): string {
-  const last = n % 10;
-  const lastTwo = n % 100;
-  if (lastTwo >= 11 && lastTwo <= 14) return 'ов';
-  if (last === 1) return '';
-  if (last >= 2 && last <= 4) return 'а';
-  return 'ов';
-}
-
-function Dialog({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
     <div className="modal-backdrop animate-fade-in" onClick={onClose}>
       <div
-        className="card-pop w-full max-w-lg p-6 animate-fade-up"
+        className="card-pop w-full max-w-md p-6 animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold">{title}</h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink">{title}</h3>
           <button onClick={onClose} className="btn-icon" title="Закрыть">
-            <CloseIcon size={16} />
+            <CloseIcon size={14} />
           </button>
         </div>
-        {children}
+        <p className="text-xs text-muted leading-relaxed">{message}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn btn-secondary text-xs">
+            {cancelLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`btn text-xs ${
+              danger ? '!bg-[#DC2626] !text-white hover:!bg-[#B91C1C]' : 'btn-primary'
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

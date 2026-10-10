@@ -6,7 +6,12 @@ import { IngestProgressDeltaSchema, type IngestStage } from '@notebook/shared';
  * Caller controls the reply object (already configured for SSE headers).
  */
 export interface IngestEmitter {
-  progress(stage: IngestStage, ratio?: number, message?: string): void;
+  /**
+   * Emit a progress event. Pass `sourceId` (the new source row's id) so the
+   * client can poll `GET /sources/:id` to recover if the SSE stream dies
+   * before `done`.
+   */
+  progress(stage: IngestStage, ratio?: number, message?: string, sourceId?: string): void;
   done(source: unknown): void;
   error(message: string): void;
 }
@@ -18,8 +23,8 @@ export function makeIngestEmitter(reply: FastifyReply): IngestEmitter {
     reply.raw.write(`data: ${JSON.stringify(ok.data)}\n\n`);
   };
   return {
-    progress(stage, ratio, message) {
-      send({ type: 'progress', stage, ratio, message });
+    progress(stage, ratio, message, sourceId) {
+      send({ type: 'progress', stage, ratio, message, sourceId });
     },
     done(source) {
       send({ type: 'done', source });

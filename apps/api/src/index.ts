@@ -1,20 +1,10 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import sensible from '@fastify/sensible';
-import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { ping as embeddingsPing } from './vectordb/client.js';
 import { closeDb } from './db/index.js';
-import { notebookRoutes } from './routes/notebooks.js';
-import { sourceRoutes } from './routes/sources.js';
-import { chatRoutes } from './routes/chat.js';
-import { artifactRoutes } from './routes/artifacts.js';
-import { searchRoutes } from './routes/search.js';
-import { discoverRoutes } from './routes/discover.js';
-import { summaryRoutes } from './routes/summary.js';
+import { buildApp } from './app.js';
 
 async function main() {
-  const app = Fastify({
+  const app = await buildApp({
     logger: {
       level: config.LOG_LEVEL,
       transport:
@@ -24,12 +14,11 @@ async function main() {
     },
   });
 
-  await app.register(cors, { origin: true, credentials: true });
-  await app.register(sensible);
-  await app.register(multipart, {
-    limits: { fileSize: 50 * 1024 * 1024 },
-  });
-
+  // Override the minimal /api/health from buildApp() with the real one
+  // that pings the embedding server. We can't register a second route
+  // on the same path, so we close+re-open is not an option either; the
+  // simplest correct fix is to wire the real handler here before
+  // listen().
   app.get('/api/health', async () => {
     const embeddingsOk = await embeddingsPing();
     return {
@@ -39,14 +28,6 @@ async function main() {
       version: '0.2.0',
     };
   });
-
-  await app.register(notebookRoutes);
-  await app.register(sourceRoutes);
-  await app.register(chatRoutes);
-  await app.register(artifactRoutes);
-  await app.register(searchRoutes);
-  await app.register(discoverRoutes);
-  await app.register(summaryRoutes);
 
   const shutdown = async () => {
     app.log.info('shutting down');

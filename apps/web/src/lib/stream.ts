@@ -6,6 +6,19 @@ export interface ChatStreamOptions {
   provider?: string;
   model?: string;
   topK?: number;
+  /**
+   * Restrict retrieval to the selected sources. Absent or [] = all
+   * sources in the notebook. Validated by the API (400 on cross-
+   * notebook or unknown id). Persisted per-notebook via UI.
+   */
+  sourceIds?: string[];
+  /**
+   * Last N persisted user/assistant turns from this notebook so the
+   * LLM keeps conversational context across page reloads. The web
+   * side caps length and strips empty / error-only rows before
+   * sending. See ChatPanel for the trim logic.
+   */
+  history?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   signal?: AbortSignal;
 }
 
@@ -14,6 +27,12 @@ export interface ChatStreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (messageId: string) => void;
   onError?: (msg: string) => void;
+  /**
+   * Fires when the stream is aborted by us (refresh / unmount / Strict-Mode
+   * double-mount). Distinct from onError so the UI can reset `streaming` and
+   * clear `abortRef` without showing the user a scary "aborted" message.
+   */
+  onAbort?: () => void;
 }
 
 /**
@@ -28,6 +47,8 @@ export function streamChat(opts: ChatStreamOptions, handlers: ChatStreamHandlers
       provider: opts.provider,
       model: opts.model,
       topK: opts.topK,
+      sourceIds: opts.sourceIds,
+      history: opts.history,
     },
     opts.signal,
     handlers,
@@ -48,6 +69,12 @@ export interface SummaryStreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (summaryId: string) => void;
   onError?: (msg: string) => void;
+  /**
+   * Fires when the stream is aborted by us (refresh / unmount / Strict-Mode
+   * double-mount). Distinct from onError so the UI can reset `streaming` and
+   * clear `abortRef` without showing the user a scary "aborted" message.
+   */
+  onAbort?: () => void;
 }
 
 export function streamSummary(opts: SummaryStreamOptions, handlers: SummaryStreamHandlers): () => void {
@@ -69,6 +96,7 @@ interface ParsedHandlers {
   onToken?: (text: string) => void;
   onDone?: (id: string) => void;
   onError?: (msg: string) => void;
+  onAbort?: () => void;
 }
 
 /** Internal: shared SSE reader for chat + summary. */
@@ -97,33 +125,61 @@ function openSse(
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      /** Dispatch a parsed SSE event. */
+      const dispatch = (json: string) => {
+        if (!json) return;
+        try {
+          const delta = JSON.parse(json) as ChatDelta | SummaryDelta;
+          if (delta.type === 'citations') handlers.onCitations?.(delta.chunks);
+          else if (delta.type === 'token') handlers.onToken?.(delta.text);
+          else if (delta.type === 'done') {
+            const id = 'messageId' in delta ? delta.messageId : delta.summaryId;
+            handlers.onDone?.(id);
+          } else if (delta.type === 'error') handlers.onError?.(delta.message);
+        } catch {
+          // ignore malformed chunk
+        }
+      };
+      /** Try to flush one complete `\n\n`-terminated block from `buf`. */
+      const flushBlock = (): boolean => {
+        const nl = buf.indexOf('\n\n');
+        if (nl === -1) return false;
+        const block = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        const line = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) return true;
+        dispatch(line.slice(5).trim());
+        return true;
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf('\n\n')) !== -1) {
-          const block = buf.slice(0, nl);
-          buf = buf.slice(nl + 2);
-          const line = block.split('\n').find((l) => l.startsWith('data:'));
-          if (!line) continue;
-          const json = line.slice(5).trim();
-          if (!json) continue;
-          try {
-            const delta = JSON.parse(json) as ChatDelta | SummaryDelta;
-            if (delta.type === 'citations') handlers.onCitations?.(delta.chunks);
-            else if (delta.type === 'token') handlers.onToken?.(delta.text);
-            else if (delta.type === 'done') {
-              const id = 'messageId' in delta ? delta.messageId : delta.summaryId;
-              handlers.onDone?.(id);
-            } else if (delta.type === 'error') handlers.onError?.(delta.message);
-          } catch {
-            // ignore malformed chunk
-          }
+        while (flushBlock()) {
+          /* drain all complete blocks */
         }
       }
+      // Server closed the stream. If `buf` has anything left over (no
+      // trailing `\n\n`), treat it as one final block. This is the common
+      // case for our backend which omits the blank line after `done`.
+      // Without this, the terminal event silently disappears and any
+      // `onDone`/`onError` handler in the panel never fires — so things
+      // like `savePersisted` (SummaryPanel) never run.
+      const trailing = buf.trim();
+      if (trailing) {
+        buf = '';
+        const line = trailing.split('\n').find((l) => l.startsWith('data:'));
+        if (line) dispatch(line.slice(5).trim());
+      }
     } catch (err) {
-      if ((err as { name?: string }).name === 'AbortError') return;
+      if ((err as { name?: string }).name === 'AbortError') {
+        // Abort is not an error from the user's perspective — it just means
+        // a new request superseded this one (Strict-Mode double-mount,
+        // refresh button, notebook switch). Reset state without surfacing
+        // an error message.
+        handlers.onAbort?.();
+        return;
+      }
       handlers.onError?.(err instanceof Error ? err.message : String(err));
     }
   })();

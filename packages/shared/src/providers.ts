@@ -44,13 +44,64 @@ export interface LLMProvider {
   chat(req: ProviderChatRequest): AsyncIterable<ChatStreamEvent>;
 }
 
-/** Marker that tells the model to cite sources with [N] markers. */
+/**
+ * Marker that tells the model to cite sources with [N] markers.
+ *
+ * Strict version (verified answering): the model must refuse to invent
+ * citations and must surface the special `UNSUPPORTED:` prefix when no
+ * chunk answers the question. The chat route post-processes the stream
+ * via `sanitizeCitations` (see below) to drop any `[N]` marker whose
+ * index is out of range — the prompt just makes that vanishingly rare.
+ */
 export const CITATION_INSTRUCTIONS = [
   'You are a research assistant answering questions strictly from the provided sources.',
   'For every claim, append a citation marker like [1], [2] in the text.',
-  'If the answer is not in the sources, say so plainly.',
+  'You may use at most N citations, where N is the number of provided sources. Indices are 1-based and must be within this range.',
+  'If NONE of the provided sources contain enough information to answer, reply with EXACTLY one line: "UNSUPPORTED: <short reason>". Do not add [N] markers and do not invent facts.',
+  'If the answer is only partially in the sources, ground the parts that are and explicitly say which parts you could not verify.',
   'Be concise. Use markdown.',
 ].join('\n');
+
+/**
+ * Sentinel prefix that the chat route treats as a hard refusal: the rest
+ * of the answer is dropped, the assistant row is stored as-is, and the
+ * UI shows it as the model's own statement rather than a system error.
+ */
+export const UNSUPPORTED_PREFIX = 'UNSUPPORTED:';
+
+/**
+ * True when `text` is a hard-refusal answer (the model decided no chunk
+ * was enough). The chat route and the web UI both use this to skip
+ * rendering citation chips and to label the row as a verified no-answer.
+ */
+export function isUnsupported(text: string): boolean {
+  return text.startsWith(UNSUPPORTED_PREFIX);
+}
+
+/**
+ * Post-process a streamed assistant answer so the user never sees a
+ * `[N]` marker pointing at a citation the model was never shown.
+ *
+ * Rules (applied in order):
+ *  1. If `text` starts with `UNSUPPORTED_PREFIX`, return it as-is.
+ *  2. Replace any `[N]` whose N is outside `1..citationCount` with `[?]`.
+ *     Out-of-range markers are kept visible (as `[?]`) rather than
+ *     silently deleted so the user notices the model tried to cite
+ *     something it shouldn't have.
+ *  3. If the resulting text is empty (only whitespace), return an empty
+ *     string — the route then sends a single token event so the SSE
+ *     still terminates normally.
+ */
+export function sanitizeCitations(text: string, citationCount: number): string {
+  if (text.startsWith(UNSUPPORTED_PREFIX)) return text;
+  return text.replace(/\[(\d+)\]/g, (match, n: string) => {
+    const idx = Number.parseInt(n, 10);
+    if (Number.isNaN(idx) || idx < 1 || idx > citationCount) {
+      return '[?]';
+    }
+    return match;
+  });
+}
 
 /** Format retrieved chunks for the system prompt as a numbered list. */
 export function formatContextForPrompt(context: CitationChunk[]): string {

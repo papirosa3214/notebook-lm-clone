@@ -103,6 +103,13 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
             });
           }
         },
+        onAbort: () => {
+          // Newer refresh / Strict-Mode double-mount superseded us — reset
+          // state so the loader stops spinning even though no done/error
+          // event arrived.
+          setStreaming(false);
+          abortRef.current = null;
+        },
         onError: (msg) => {
           setStreaming(false);
           abortRef.current = null;
@@ -112,17 +119,31 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
     );
   }
 
-  // Auto-refresh trigger when this is the first time on a notebook with sources ready.
-  const didAutoRef = useRef(false);
+  // Track readyCount across renders. When a new source lands the count
+  // grows — that's the only trigger we use to mark the existing summary
+  // as stale. We intentionally do NOT auto-refresh the summary on
+  // count change: it would interrupt the user mid-scroll and burn a
+  // model call for content they're already looking at. The user hits
+  // ↻ when they're ready.
+  const lastReadyCountRef = useRef(readyCount);
+  const isStale =
+    lastReadyCountRef.current !== 0 &&
+    readyCount > lastReadyCountRef.current;
+  // Persist current count for the next render. Use effect (not render)
+  // so the value during the stale-check is the previous one.
   useEffect(() => {
-    if (didAutoRef.current) return;
+    lastReadyCountRef.current = readyCount;
+  }, [readyCount]);
+
+  // Auto-refresh ONLY on the very first render when there's a cached
+  // summary that was loaded from localStorage (no LLM call needed).
+  // We do not auto-summarize — that's the user's job now.
+  const didLoadRef = useRef(false);
+  useEffect(() => {
+    if (didLoadRef.current) return;
     if (refreshTick > 0) return;
     if (!sources.data) return;
-    const cached = loadPersisted(notebookId);
-    if (cached) return;
-    if (readyCount === 0) return;
-    didAutoRef.current = true;
-    refresh();
+    didLoadRef.current = true;
   }, [readyCount, sources.data, notebookId, refreshTick]);
 
   const empty = !streaming && content.length === 0 && !error;
@@ -152,6 +173,16 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
               <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white">
                 генерируется…
               </span>
+            )}
+            {!streaming && isStale && content && (
+              <button
+                type="button"
+                onClick={() => refresh()}
+                className="rounded-full bg-amber-400/90 px-2 py-0.5 text-[10px] font-medium text-amber-950 hover:bg-amber-300"
+                title="Добавлен новый источник — обзор стал неполным"
+              >
+                устарело · обновить
+              </button>
             )}
           </div>
           {!streaming && content && readyCount > 0 && (
@@ -203,10 +234,13 @@ export function SummaryPanel({ notebookId, onOpenSource }: Props) {
           <div className="space-y-4">
             <div className="prose-summary animate-fade-in">
               {streaming && !content ? (
-                <span className="inline-flex items-center gap-1.5 text-muted">
-                  <Dot delay={0} />
-                  <Dot delay={150} />
-                  <Dot delay={300} />
+                <span className="inline-flex items-center gap-2 text-sm text-muted">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Dot delay={0} />
+                    <Dot delay={150} />
+                    <Dot delay={300} />
+                  </span>
+                  Загружаю модель…
                 </span>
               ) : (
                 renderMarkdownLite(content)
