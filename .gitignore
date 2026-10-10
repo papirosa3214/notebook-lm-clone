@@ -13,3 +13,7 @@ coverage/
 .pnpm-store/
 apps/api/data/
 *.tsbuildinfo
+
+# мусор агентов: результаты MCP-вызовов и отладочные скриншоты
+.manus/
+.work/debug/
