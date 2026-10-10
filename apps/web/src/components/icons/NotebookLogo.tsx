@@ -105,9 +105,15 @@ export function MoonIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-export function ChevronDownIcon({ size = 14 }: { size?: number }) {
+export function ChevronDownIcon({
+  size = 14,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <polyline points="6 9 12 15 18 9" />
     </svg>
   );
