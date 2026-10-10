@@ -11,10 +11,16 @@
  * Returns the path to the downloaded file (caller is responsible for cleanup).
  * Throws a Russian error message if yt-dlp is missing or fails.
  */
-import { spawn } from 'node:child_process';
 import { mkdtemp, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  extractVideoId,
+  lastErrorLine,
+  runProc,
+  which,
+  ytCookiesPath,
+} from './ytDlp.js';
 
 export async function fetchYouTubeAudio(urlOrId: string): Promise<{
   audioPath: string;
@@ -34,7 +40,7 @@ export async function fetchYouTubeAudio(urlOrId: string): Promise<{
     );
   }
 
-  const cookies = process.env.YT_COOKIES_PATH;
+  const cookies = await ytCookiesPath();
   const dir = await mkdtemp(join(tmpdir(), 'yt-audio-'));
   // Use plain id-based template (no title) so the filename has no spaces,
   // special characters, or unicode that can confuse downstream parsers.
@@ -58,12 +64,11 @@ export async function fetchYouTubeAudio(urlOrId: string): Promise<{
     `https://www.youtube.com/watch?v=${id}`,
   ];
 
-  const { stdout, code } = await runProc(ytDlp, args, 10 * 60 * 1000);
+  const { stdout, stderr, code } = await runProc(ytDlp, args, 10 * 60 * 1000);
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
-    throw new Error(
-      `yt-dlp не смог скачать аудио (код ${code}). Проверь ссылку или обнови cookies.`,
-    );
+    const reason = lastErrorLine(stderr) ?? `yt-dlp завершился с кодом ${code}`;
+    throw new Error(`yt-dlp не смог скачать аудио: ${reason}`);
   }
 
   // Three \n-separated prints come on stdout, in order:
@@ -99,56 +104,4 @@ const audioPath = lines[2] ?? '';
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     },
   };
-}
-
-function extractVideoId(input: string): string | null {
-  const patterns = [
-    /(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
-    /^([A-Za-z0-9_-]{11})$/,
-  ];
-  for (const re of patterns) {
-    const m = input.match(re);
-    if (m && m[1]) return m[1];
-  }
-  return null;
-}
-
-async function which(bin: string): Promise<string | null> {
-  // PATH-search. Spawn `which` once; on macOS it's at /usr/bin/which.
-  return new Promise<string | null>((resolve) => {
-    const proc = spawn('/usr/bin/which', [bin], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    proc.stdout.on('data', (b) => (out += b.toString()));
-    proc.on('error', () => resolve(null));
-    proc.on('close', (code) => {
-      if (code === 0) resolve(out.trim() || null);
-      else resolve(null);
-    });
-  });
-}
-
-function runProc(
-  bin: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (b) => (stdout += b.toString()));
-    proc.stderr.on('data', (b) => (stderr += b.toString()));
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`yt-dlp превысил таймаут ${Math.round(timeoutMs / 1000)} сек`));
-    }, timeoutMs);
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, code });
-    });
-  });
 }

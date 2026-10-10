@@ -10,8 +10,9 @@
 - **Vector store / Retrieval:** локальный, через `sqlite-vec` (виртуальная таблица + KNN по `embedding float[1024]`) + FTS5/BM25 с RRF-merge, embed-fallback на FTS5 при падении Ollama
 - **Embeddings:** `bge-m3-embed@Ollama` на `.110:11434` (1024-dim, один запрос на чанк; вставляем батчами по 8 параллельно)
 - **LLM providers:** Ollama (qwen3.6-27b-iq4-16k по умолчанию), Anthropic, OpenAI
-- **Парсинг:** html2text (URL → markdown), pdf-parse (PDF), mammoth (DOCX), youtube-transcript (субтитры)
-- **YouTube → ASR (опционально):** yt-dlp (внешний бинарь) скачивает аудио, локальный whisper.cpp `--server` распознаёт речь, ffmpeg нормализует в 16k mono wav. Используется когда youtube-transcript не справляется (login-wall, отключённые сабы, региональная блокировка).
+- **Парсинг:** html2text (URL → markdown), pdf-parse (PDF), mammoth (DOCX), yt-dlp (субтитры YouTube на русском)
+- **Cookies для YouTube:** `~/.config/yt.cookies.txt` (Netscape-формат, выгрузка из браузера) — без них yt-dlp упирается в «Sign in to confirm you're not a bot». Путь можно переопределить через `YT_COOKIES_PATH`.
+- **YouTube → ASR (опционально):** yt-dlp (внешний бинарь) скачивает аудио, локальный whisper.cpp `--server` распознаёт речь, ffmpeg нормализует в 16k mono wav. Используется когда субтитров на русском нет вовсе.
 - **Workspace:** pnpm monorepo (`apps/*` + `packages/*`)
 
 ## Структура
@@ -44,13 +45,17 @@ packages/
 pnpm install
 ```
 
-### 2. (опционально) Установить внешние бинари для YouTube → ASR
+### 2. (опционально) Внешние бинари и куки для YouTube
 
-Эти зависимости нужны **только** если собираешься пользоваться кнопкой
-«YouTube → ASR» в `SourcesPanel`. Без них всё остальное работает.
+`yt-dlp` нужен для субтитров (основной путь) и для «YouTube → ASR».
+`ffmpeg` и whisper.cpp нужны только кнопке «YouTube → ASR» в `SourcesPanel`.
+Куки нужны обоим путям: без них YouTube отдаёт бот-проверку.
 
 ```bash
 brew install yt-dlp ffmpeg
+# cookies.txt (Netscape) из залогиненного браузера положить сюда:
+#   ~/.config/yt.cookies.txt     (или указать свой путь в YT_COOKIES_PATH)
+
 # плюс поднять whisper.cpp --server (по умолчанию ждём на 127.0.0.1:8000):
 #   https://github.com/ggerganov/whisper.cpp/tree/master/examples/server
 ```
@@ -116,10 +121,13 @@ pnpm --filter @notebook/web dev      # Web на :5173
 URL         → fetch → html2text    → .md → recursive splitter (~2 KB chunks) → Ollama bge-m3 embed (8 параллельно) → vec_chunks + chunks
 PDF/DOCX    → extractXxx           → .md → то же
 TXT/MD      → как есть              → .md → то же
+YouTube URL → yt-dlp subs (ru)     → [m:ss] text → то же
+              (ручные субтитры или автосубы; yt-dlp --cookies снимает бот-стену)
 YouTube URL → youtube-transcript   → [m:ss] text → то же
+              (запасной путь, когда бинаря yt-dlp нет; куки не поддерживает)
 YouTube URL → yt-dlp audio → ffmpeg → 16k wav → whisper.cpp --server → [m:ss] text → то же
-              (используется когда youtube-transcript не смог:
-               login-wall, отключённые сабы, региональная блокировка)
+              (используется когда субтитров на русском нет вовсе:
+               автор отключил сабы, дорожки не существует)
 ```
 
 К моменту завершения POST источник уже `ready` (или `failed` с error) — никакого
@@ -268,14 +276,17 @@ Palette на мобильном). Два слайдера ограничиваю
 
 - **PDF-парсинг:** `pdf-parse` имеет известные баги (импортирует дефолтные тестовые файлы);
   если упадёт — переключиться на `pdfjs-dist`
-- **YouTube (обычный):** использует HTML-скрейпинг через `youtube-transcript`; для
-  большинства роликов нужны ru→en lang-fallback, иначе отдаётся пустой
-  transcript. Если всё равно пусто — кнопка «YouTube → ASR».
+- **YouTube (обычный):** берёт дорожку субтитров на русском через `yt-dlp`
+  (`--write-subs --write-auto-subs --sub-langs ru`), видео не качает. Без
+  cookies YouTube отдаёт «Sign in to confirm you're not a bot» почти на
+  каждом ролике, поэтому нужен свежий `~/.config/yt.cookies.txt`
+  (или свой путь в `YT_COOKIES_PATH`). Если yt-dlp в PATH не найден — откат на
+  библиотеку `youtube-transcript` (куки она не поддерживает).
 - **YouTube → ASR:** требует установленных `yt-dlp` (brew) и `ffmpeg` (brew),
   плюс запущенного `whisper.cpp --server` на `WHISPER_BASE_URL` (по умолчанию
   `http://127.0.0.1:8000`). Время: ~1× реал-тайма на распознавание
-  (10-минутное видео ≈ 10 минут). Cookies (`YT_COOKIES_PATH`) помогают против
-  login-wall, но без них часть роликов будет недоступна.
+  (10-минутное видео ≈ 10 минут). Куки (`YT_COOKIES_PATH` или
+  `~/.config/yt.cookies.txt`) подхватываются автоматически.
 - **Embedding latency:** Ollama `bge-m3-embed` ~1–2 сек на чанк; для страницы
   на 30 чанков добавление занимает ~10–20 сек (батчами по 8 параллельно).
   Если embedding-сервер упал, retrieval автоматически переключается на
