@@ -3,6 +3,21 @@
 Веб-приложение в духе Google NotebookLM: источники + чат с LLM + markdown-артефакты.
 Локальный vector store на базе SQLite + sqlite-vec, embeddings через Ollama.
 
+## Git: Gitea + GitHub
+
+Репозиторий живёт в двух местах, содержимое у них всегда одинаковое:
+
+- **Gitea** (свой сервер): `https://git.mizernyukmy.netcraze.pro/maksim/Notebook-LM-clon.git`
+- **GitHub**: `https://github.com/papirosa3214/notebook-lm-clone`
+
+У обоих remote по два push-url, поэтому обычный `git push` (и `git push --delete`)
+уезжает сразу на оба сервера. Полная сверка — если что-то запушили мимо,
+например через веб-интерфейс GitHub:
+
+```bash
+sh scripts/sync-remotes.sh     # fetch --all --prune + выравнивание веток
+```
+
 ## Стек
 
 - **Frontend:** Vite 5 + React 19 + TypeScript, Tailwind CSS 3, TanStack Query, React Router
