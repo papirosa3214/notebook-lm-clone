@@ -5,6 +5,7 @@
  */
 import { config } from '../config.js';
 import { getRawSqlite } from '../db/index.js';
+import { resolveEmbeddingPlacement } from '../embedding/lifecycle.js';
 import { retrievalCache } from './cache.js';
 
 export class VectorDbError extends Error {
@@ -36,10 +37,36 @@ export function buildFtsQuery(question: string): string | null {
 
 // =========== Embeddings =========
 
-/** Call Ollama embeddings API. Times out at 60 s — Ollama stalls long enough
- *  and the SSE ingest stream is going to die anyway, so fail fast. */
-export async function embed(text: string): Promise<Float32Array> {
-  const res = await fetch(`${config.EMBEDDING_BASE_URL}/api/embeddings`, {
+/** Ollama answers "busy" with 503 and "too many" with 429 — both mean
+ *  "come back in a moment", not "broken". A dead server still answers,
+ *  so retrying a 503 is safe; retrying a 500 with a bad payload is not. */
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 503;
+}
+
+/** Backoff for a busy model server: 0.5s, 1s, 2s, 4s, plus jitter so
+ *  parallel chunk embeds don't wake up in lockstep and re-collide.
+ *  Budget is deliberately short (~7.5s): past that the server is not
+ *  "busy", it is down, and holding an ingest open helps nobody. */
+const EMBED_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
+
+function retryDelayMs(attempt: number): number {
+  const base = EMBED_RETRY_DELAYS_MS[attempt] ?? EMBED_RETRY_DELAYS_MS.at(-1)!;
+  return base + Math.floor(Math.random() * 250);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** One embeddings round-trip. No retry — the caller owns that policy. */
+async function embedOnce(text: string): Promise<Response> {
+  // Placement is decided from actual free VRAM, not hardcoded to GPU: a
+  // resident 27B chat model leaves too little room for bge-m3, and a
+  // request that insists on GPU makes Ollama park the model without
+  // video memory and wedge the whole server. See resolveEmbeddingPlacement.
+  const num_gpu = await resolveEmbeddingPlacement();
+  return fetch(`${config.EMBEDDING_BASE_URL}/api/embeddings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -50,12 +77,40 @@ export async function embed(text: string): Promise<Float32Array> {
       // instant the request finishes, and the next embed call has to
       // cold-load from disk while chat is still resident.
       keep_alive: '30m',
-      options: { num_gpu: 999 },
+      options: { num_gpu },
     }),
     signal: AbortSignal.timeout(60_000),
   });
+}
+
+/**
+ * Call Ollama embeddings API. Times out at 60 s per attempt — Ollama stalls
+ * long enough and the SSE ingest stream is going to die anyway, so fail fast.
+ *
+ * Retries while the server answers "busy". A busy model server is the normal
+ * state of this setup: the embed model is loaded on demand next to a resident
+ * 27B chat model, and every chunk of every source goes through here. Without
+ * the retry, one momentary 503 aborts the whole source (addSourceText rolls it
+ * back) and the user sees "источников нет" for a server that is merely busy.
+ */
+export async function embed(text: string): Promise<Float32Array> {
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await embedOnce(text);
+    if (res.ok || !isRetryableStatus(res.status) || attempt >= EMBED_RETRY_DELAYS_MS.length) {
+      break;
+    }
+    await sleep(retryDelayMs(attempt));
+  }
+
   if (!res.ok) {
-    throw new VectorDbError(res.status, `embed failed: ${await res.text()}`);
+    const body = await res.text().catch(() => '');
+    throw new VectorDbError(
+      res.status,
+      res.status === 503 || res.status === 429
+        ? `модель эмбеддингов занята (Ollama: ${body.slice(0, 120)})`
+        : `embed failed: ${body}`,
+    );
   }
   const body = (await res.json()) as { embedding: number[] };
   const arr = new Float32Array(body.embedding);

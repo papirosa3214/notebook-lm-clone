@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import type {
   IngestProgressDelta,
   IngestStage,
   Source,
+  SourceGroup,
   SourceKind,
 } from '../lib/types';
 import { SourceDetailSheet } from './SourceDetailSheet';
@@ -18,6 +19,7 @@ import {
   RefreshIcon,
   SendIcon,
   CloseIcon,
+  ChevronDownIcon,
   TrashIcon,
 } from './icons/NotebookLogo';
 
@@ -78,6 +80,19 @@ export function SourcesPanel({ notebookId }: Props) {
   const readyCount = sources.data?.sources.filter((s) => s.status === 'ready').length ?? 0;
   const totalCount = sources.data?.sources.length ?? 0;
 
+  // Thematic sections. The server clusters the sources once and caches
+  // the split by source-set signature, so this query is a cheap read on
+  // every panel mount and an LLM call only when the source set changed.
+  const groups = useQuery({
+    queryKey: ['source-groups', notebookId],
+    queryFn: () => api.getSourceGroups(notebookId),
+  });
+  const regroup = useMutation({
+    mutationFn: () => api.getSourceGroups(notebookId, true),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['source-groups', notebookId] }),
+  });
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
   let scope: ReturnType<typeof useSourceScopeContext> | null = null;
   try {
     scope = useSourceScopeContext();
@@ -96,6 +111,20 @@ export function SourcesPanel({ notebookId }: Props) {
       (s.summary && s.summary.toLowerCase().includes(q))
     );
   });
+
+  const sections = buildSections(filteredSources, groups.data?.groups ?? []);
+  const sectioned = sections.length > 0;
+  // While the query is in flight we render the flat list, so a notebook
+  // with three sources never flashes section headers in and back out.
+  const canRegroup = totalCount >= 4;
+
+  const toggleSection = (title: string) =>
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
 
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -120,6 +149,18 @@ export function SourcesPanel({ notebookId }: Props) {
               title="Сбросить выбор — выбрать все готовые источники"
             >
               Все
+            </button>
+          )}
+          {canRegroup && (
+            <button
+              type="button"
+              onClick={() => regroup.mutate()}
+              disabled={regroup.isPending}
+              className="rounded-full px-2 py-1 text-[11px] font-medium text-muted hover:text-ink hover:bg-surface-tint disabled:opacity-50"
+              title="Пересобрать тематические разделы по источникам"
+              data-testid="regroup-sources"
+            >
+              {regroup.isPending ? 'Разделяю…' : 'Перегруппировать'}
             </button>
           )}
           <button
@@ -185,26 +226,77 @@ export function SourcesPanel({ notebookId }: Props) {
           </div>
         )}
 
-        <ul className="space-y-2">
-          {filteredSources.map((s) => (
-            <SourceItem
-              key={s.id}
-              source={s}
-              onSelect={() => setOpenSource(s)}
-              onDelete={() => setPendingDelete(s)}
-              selected={
-                scope
-                  ? isSourceInScope(s.id, scope.selectedIds, scope.readyIds)
-                  : true
-              }
-              onToggle={
-                scope && s.status === 'ready'
-                  ? () => scope.toggle(s.id)
-                  : undefined
-              }
-            />
-          ))}
-        </ul>
+        {sectioned ? (
+          <div className="space-y-4">
+            {sections.map((section) => {
+              const collapsed = collapsedSections.has(section.title);
+              return (
+                <section key={section.title} data-testid="source-section">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section.title)}
+                    className="mb-1.5 flex w-full items-center gap-1.5 rounded-lg px-1 py-1 text-left transition-colors hover:bg-surface-tint/60"
+                    aria-expanded={!collapsed}
+                  >
+                    <ChevronDownIcon
+                      size={12}
+                      className={`shrink-0 text-muted transition-transform ${collapsed ? '-rotate-90' : ''}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      {section.title}
+                    </span>
+                    <span className="shrink-0 rounded-full bg-surface-tint px-1.5 py-0.5 text-[10px] font-medium text-muted">
+                      {section.sources.length}
+                    </span>
+                  </button>
+                  {!collapsed && (
+                    <ul className="space-y-2">
+                      {section.sources.map((s) => (
+                        <SourceItem
+                          key={s.id}
+                          source={s}
+                          onSelect={() => setOpenSource(s)}
+                          onDelete={() => setPendingDelete(s)}
+                          selected={
+                            scope
+                              ? isSourceInScope(s.id, scope.selectedIds, scope.readyIds)
+                              : true
+                          }
+                          onToggle={
+                            scope && s.status === 'ready'
+                              ? () => scope.toggle(s.id)
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {filteredSources.map((s) => (
+              <SourceItem
+                key={s.id}
+                source={s}
+                onSelect={() => setOpenSource(s)}
+                onDelete={() => setPendingDelete(s)}
+                selected={
+                  scope
+                    ? isSourceInScope(s.id, scope.selectedIds, scope.readyIds)
+                    : true
+                }
+                onToggle={
+                  scope && s.status === 'ready'
+                    ? () => scope.toggle(s.id)
+                    : undefined
+                }
+              />
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Add Sources Center Hub Modal */}
@@ -242,6 +334,46 @@ export function SourcesPanel({ notebookId }: Props) {
       )}
     </div>
   );
+}
+
+/**
+ * Turn the flat source list into sections.
+ *
+ * Exported for tests: the grouping must stay a partition of the visible
+ * list, because the checkboxes the user clicks while reading section by
+ * section build the chat's context scope — a source rendered twice would
+ * toggle inconsistently depending on which copy was clicked.
+ *
+ * Two defensive moves, since the client shouldn't trust the cache blob
+ * blindly: ids are claimed by the first section that mentions them, and
+ * anything the server's split missed lands in «Другие» rather than
+ * vanishing. Returns [] when there's nothing to group, which the panel
+ * renders as the plain list it has always shown.
+ */
+export function buildSections(
+  sources: Source[],
+  groups: SourceGroup[],
+): Array<{ title: string; sources: Source[] }> {
+  if (groups.length === 0) return [];
+
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  const claimed = new Set<string>();
+  const sections: Array<{ title: string; sources: Source[] }> = [];
+
+  for (const group of groups) {
+    const items = group.sourceIds
+      .filter((id) => !claimed.has(id))
+      .map((id) => byId.get(id))
+      .filter((s): s is Source => Boolean(s));
+    if (items.length === 0) continue;
+    items.forEach((s) => claimed.add(s.id));
+    sections.push({ title: group.title, sources: items });
+  }
+
+  const rest = sources.filter((s) => !claimed.has(s.id));
+  if (rest.length > 0) sections.push({ title: 'Другие', sources: rest });
+
+  return sections;
 }
 
 /** What the single add-source input looks like it contains. */

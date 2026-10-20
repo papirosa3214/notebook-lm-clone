@@ -4,6 +4,8 @@ import sensible from '@fastify/sensible';
 import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { notebookRoutes } from './routes/notebooks.js';
+import { coverRoutes } from './routes/cover.js';
+import { sourceGroupRoutes } from './routes/sourceGroups.js';
 import { sourceRoutes } from './routes/sources.js';
 import { chatRoutes } from './routes/chat.js';
 import { artifactRoutes } from './routes/artifacts.js';
@@ -19,6 +21,7 @@ import { exportRoutes } from './routes/export.js';
 import { suggestionRoutes } from './routes/suggestions.js';
 import { aiEditRoutes } from './routes/aiEdit.js';
 import { deepResearchRoutes } from './routes/deepResearch.js';
+import { youtubeCookieRoutes } from './routes/youtube.js';
 
 /**
  * Construct the Fastify app without binding to a port. The production
@@ -46,6 +49,8 @@ export async function buildApp(
   // embeddingsPing). Keeping a stub here collides with Fastify 5's
   // duplicate-route detection.
   await app.register(notebookRoutes);
+  await app.register(coverRoutes);
+  await app.register(sourceGroupRoutes);
   await app.register(sourceRoutes);
   await app.register(chatRoutes);
   await app.register(artifactRoutes);
@@ -61,6 +66,7 @@ export async function buildApp(
   await app.register(suggestionRoutes);
   await app.register(aiEditRoutes);
   await app.register(deepResearchRoutes);
+  await app.register(youtubeCookieRoutes);
 
   return app;
 }

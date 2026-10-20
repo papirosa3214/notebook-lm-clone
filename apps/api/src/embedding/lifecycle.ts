@@ -87,6 +87,41 @@ export async function prepareEmbedding(): Promise<{ mode: 'gpu' | 'cpu'; freeVra
   return { mode, freeVramMb };
 }
 
+/**
+ * Where the embed request should run, cached briefly.
+ *
+ * bge-m3 in fp16 needs roughly 2.3 GB of VRAM. A resident 27B chat model
+ * leaves ~1.7 GB free on a 16 GB card, so demanding GPU placement
+ * (`num_gpu: 999`) there makes Ollama park the model with **no** VRAM
+ * allocated — after which every request, embeddings and chat alike, is
+ * answered with "server busy, maximum pending requests exceeded", because
+ * the loading slot never resolves. Asking for CPU placement when VRAM is
+ * tight avoids parking the model at all: slower, but it answers.
+ *
+ * Cached because nvidia-smi costs a process spawn and every chunk embed
+ * would otherwise pay for one.
+ */
+let placementCache: { num_gpu: number; at: number } | null = null;
+const PLACEMENT_TTL_MS = 30_000;
+
+export async function resolveEmbeddingPlacement(): Promise<number> {
+  if (placementCache && Date.now() - placementCache.at < PLACEMENT_TTL_MS) {
+    return placementCache.num_gpu;
+  }
+  const freeVramMb = await probeFreeVramMb();
+  // Headroom on purpose: "free" fluctuates, and a model that just misses
+  // the fit is far worse than one that simply runs on CPU.
+  const num_gpu = freeVramMb >= REQUIRED_VRAM_MB + 512 ? 999 : 0;
+  placementCache = { num_gpu, at: Date.now() };
+  if (num_gpu === 0 && freeVramMb > 0) {
+    console.warn(
+      `[embedding-lifecycle] свободно ${freeVramMb} МБ VRAM — эмбеддинги уходят на CPU, ` +
+        'иначе Ollama припаркует модель без видеопамяти и заблокирует очередь',
+    );
+  }
+  return num_gpu;
+}
+
 /** Drop the model from Ollama by sending an embedding request with
  *  keep_alive=0. Idempotent. Best-effort. */
 export async function releaseEmbedding(): Promise<void> {

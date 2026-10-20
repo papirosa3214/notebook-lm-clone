@@ -135,6 +135,9 @@ type NotebookSummary = {
   readySourceCount?: number;
   defaultProvider?: string;
   createdAt: string;
+  /** Signature of the stored cover recipe — changes when the art is
+   *  regenerated, so it doubles as an image cache-buster. */
+  coverSignature?: string | null;
 };
 
 function NotebookCard({ notebook: n }: { notebook: NotebookSummary }) {
@@ -148,59 +151,68 @@ function NotebookCard({ notebook: n }: { notebook: NotebookSummary }) {
   const pct = total > 0 ? Math.round((ready / total) * 100) : 0;
 
   return (
-    <li className="card group relative flex flex-col gap-3 p-5 transition-all hover:-translate-y-0.5 hover:shadow-pop">
-      <div className="flex items-start justify-between gap-3">
-        <Link
-          to={`/notebooks/${n.id}`}
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
-          style={{ backgroundColor: 'rgb(var(--nb-accent-soft))' }}
-          aria-hidden
-        >
-          <NotebookLogoMark size={28} />
-        </Link>
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            if (confirm(`Удалить «${n.title}»?`)) remove.mutate(n.id);
-          }}
-          className="btn-icon opacity-0 transition-opacity group-hover:opacity-100"
-          title="Удалить ноутбук"
-        >
-          <TrashIcon size={15} />
-        </button>
+    <li className="card group relative flex flex-col overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-pop">
+      {/* Cover — a real picture taken from the notebook's own sources
+          (og:image / video poster), served by /cover. Plain <img>: the
+          endpoint redirects or falls back to an SVG, never blocks. */}
+      <div className="relative aspect-[16/7] w-full overflow-hidden bg-surface-tint">
+        <img
+          src={api.coverUrl(n.id, n.coverSignature ?? undefined)}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          width={640}
+          height={280}
+        />
       </div>
-      <Link to={`/notebooks/${n.id}`} className="block">
-        <h3 className="line-clamp-2 text-[17px] font-semibold leading-snug">
-          {n.title}
-        </h3>
-      </Link>
-      <div className="mt-1 space-y-2">
-        <div className="flex items-center justify-between text-xs text-muted">
-          <span>
-            {total === 0
-              ? 'Нет источников'
-              : `${ready} из ${total} готовы`}
-          </span>
-          {total > 0 && <span className="font-medium">{pct}%</span>}
-        </div>
-        <div
-          className="h-1.5 overflow-hidden rounded-full"
-          style={{ backgroundColor: 'rgb(var(--nb-surface-tint))' }}
-        >
-          <div
-            className="h-full rounded-full transition-all"
-            style={{
-              width: `${pct}%`,
-              backgroundColor:
-                pct === 100
-                  ? 'rgb(var(--nb-success))'
-                  : 'rgb(var(--nb-accent))',
+
+      <div className="flex flex-1 flex-col gap-3 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="line-clamp-2 min-w-0 text-[17px] font-semibold leading-snug">
+            <Link to={`/notebooks/${n.id}`} className="after:absolute after:inset-0 after:content-['']">
+              {n.title}
+            </Link>
+          </h3>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              if (confirm(`Удалить «${n.title}»?`)) remove.mutate(n.id);
             }}
-          />
+            className="btn-icon relative z-10 opacity-0 transition-opacity group-hover:opacity-100"
+            title="Удалить ноутбук"
+          >
+            <TrashIcon size={15} />
+          </button>
         </div>
-        <div className="flex items-center justify-between pt-1 text-[11px] text-subtle">
-          <span className="capitalize">{n.defaultProvider ?? 'ollama'}</span>
-          <span>{new Date(n.createdAt).toLocaleDateString('ru')}</span>
+        <div className="mt-auto space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>
+              {total === 0
+                ? 'Нет источников'
+                : `${ready} из ${total} готовы`}
+            </span>
+            {total > 0 && <span className="font-medium">{pct}%</span>}
+          </div>
+          <div
+            className="h-1.5 overflow-hidden rounded-full"
+            style={{ backgroundColor: 'rgb(var(--nb-surface-tint))' }}
+          >
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${pct}%`,
+                backgroundColor:
+                  pct === 100
+                    ? 'rgb(var(--nb-success))'
+                    : 'rgb(var(--nb-accent))',
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between pt-1 text-[11px] text-subtle">
+            <span className="capitalize">{n.defaultProvider ?? 'ollama'}</span>
+            <span>{new Date(n.createdAt).toLocaleDateString('ru')}</span>
+          </div>
         </div>
       </div>
     </li>

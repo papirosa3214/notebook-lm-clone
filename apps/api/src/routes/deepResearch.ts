@@ -15,6 +15,7 @@ import { retrieveWithRerank } from '../vectordb/client.js';
 import { addSourceText } from '../vectordb/client.js';
 import { fetchUrlToMarkdown } from '../extractors/url.js';
 import { searchWeb } from '../extractors/websearch.js';
+import { autoPrepareEmbedding, autoReleaseEmbedding } from '../embedding/lifecycle.js';
 import { parseJsonArray } from '../lib/studio/jsonArray.js';
 import { mapChunk } from './chat.js';
 
@@ -93,6 +94,9 @@ export const deepResearchRoutes: FastifyPluginAsync = async (app) => {
 
       const artifactId = nanoid(12);
       const ingested: Array<{ id: string; title: string; url: string }> = [];
+        // Kept to explain an all-failed run: "0 источников" without a
+        // reason reads as a bug, while a busy model server is fixable.
+        const failureReasons: string[] = [];
       let queries: string[] = [];
       let citations: CitationChunk[] = [];
 
@@ -156,50 +160,72 @@ export const deepResearchRoutes: FastifyPluginAsync = async (app) => {
           ratio: 0.4,
           message: `Загружаю ${toFetch.length} источников…`,
         });
-        for (let i = 0; i < toFetch.length; i++) {
-          const c = toFetch[i]!;
-          const sourceId = nanoid(12);
-          try {
-            const { markdown, title } = await fetchUrlToMarkdown(c.url);
-            db.insert(sources)
-              .values({
-                id: sourceId,
+        // Warm the embed model before the first chunk, exactly like the
+        // /sources ingest paths do. Deep Research is its own ingest path
+        // and used to walk in cold, so the very first request raced
+        // against the model load and came back 503.
+        await autoPrepareEmbedding();
+        try {
+          for (let i = 0; i < toFetch.length; i++) {
+            const c = toFetch[i]!;
+            const sourceId = nanoid(12);
+            let inserted = false;
+            try {
+              const { markdown, title } = await fetchUrlToMarkdown(c.url);
+              db.insert(sources)
+                .values({
+                  id: sourceId,
+                  notebookId: req.params.id,
+                  kind: 'url',
+                  title,
+                  url: c.url,
+                  status: 'ready',
+                })
+                .run();
+              inserted = true;
+              await addSourceText({
                 notebookId: req.params.id,
+                sourceId,
                 kind: 'url',
                 title,
                 url: c.url,
-                status: 'ready',
-              })
-              .run();
-            await addSourceText({
-              notebookId: req.params.id,
-              sourceId,
-              kind: 'url',
-              title,
-              url: c.url,
-              content: markdown,
-            });
-            ingested.push({ id: sourceId, title, url: c.url });
-            send({ type: 'hit', url: c.url, title, ingested: true });
-          } catch (err) {
+                content: markdown,
+              });
+              ingested.push({ id: sourceId, title, url: c.url });
+              send({ type: 'hit', url: c.url, title, ingested: true });
+            } catch (err) {
+              // Drop the half-built row: addSourceText rolls back its own
+              // chunks on failure, so leaving this behind would leave a
+              // 'ready' source in the panel with nothing to read.
+              if (inserted) {
+                db.delete(sources).where(eq(sources.id, sourceId)).run();
+              }
+              const reason = err instanceof Error ? err.message : String(err);
+              failureReasons.push(reason);
+              send({ type: 'hit', url: c.url, title: c.title, ingested: false, reason });
+            }
             send({
-              type: 'hit',
-              url: c.url,
-              title: c.title,
-              ingested: false,
-              reason: err instanceof Error ? err.message : String(err),
+              type: 'phase',
+              phase: 'fetching',
+              ratio: 0.4 + (0.35 * (i + 1)) / toFetch.length,
+              message: `(${i + 1}/${toFetch.length}) ${new URL(c.url).hostname}`,
             });
           }
-          send({
-            type: 'phase',
-            phase: 'fetching',
-            ratio: 0.4 + (0.35 * (i + 1)) / toFetch.length,
-            message: `(${i + 1}/${toFetch.length}) ${new URL(c.url).hostname}`,
-          });
+        } finally {
+          await autoReleaseEmbedding();
         }
 
         if (ingested.length === 0) {
-          send({ type: 'error', message: 'не удалось загрузить ни одного источника' });
+          // Name the dominant failure instead of the bare count — an
+          // occupied embed server looks identical to "the web gave us
+          // junk" unless the reason is surfaced.
+          const busy = failureReasons.find((r) => r.includes('занята'));
+          send({
+            type: 'error',
+            message: busy
+              ? `Сервер эмбеддингов занят — ни один источник не проиндексирован. Повтори через минуту. (${failureReasons.length} попыток)`
+              : `не удалось загрузить ни одного источника: ${failureReasons[0] ?? 'причина неизвестна'}`,
+          });
           reply.raw.end();
           return;
         }

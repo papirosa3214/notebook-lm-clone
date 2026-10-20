@@ -230,6 +230,32 @@ function migrate(sqlite: Database.Database) {
   // the timestamp of the last enable.
   addColumnIfMissing(sqlite, 'notebooks', 'share_token', 'TEXT');
   addColumnIfMissing(sqlite, 'notebooks', 'share_enabled_at', 'TEXT');
+
+  // Notebook cover art. cover_spec holds the JSON recipe produced by
+  // lib/coverArt.ts (palette + motif + symbol), never raw markup.
+  addColumnIfMissing(sqlite, 'notebooks', 'cover_spec', 'TEXT');
+
+  // Per-source picture (og:image / YouTube thumbnail). The notebook
+  // cover is chosen from this column; NULL just means this source
+  // offered no picture.
+  addColumnIfMissing(sqlite, 'sources', 'cover_image', 'TEXT');
+
+  // Thematic grouping of sources. One row per notebook; `signature`
+  // encodes the exact source set the grouping was built from, so a
+  // changed source list is detected on read instead of by polling.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS source_groups (
+      id TEXT PRIMARY KEY,
+      notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      payload TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+  `);
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_source_groups_notebook
+      ON source_groups(notebook_id);
+  `);
 }
 
 /**

@@ -20,6 +20,29 @@ export const notebooks = sqliteTable('notebooks', {
   // revoked link returns 404 forever.
   shareToken: text('share_token'),
   shareEnabledAt: text('share_enabled_at'),
+  // Cover art recipe as JSON — see lib/coverArt.ts. The model never
+  // returns markup: it picks a palette, a motif and a symbol from a
+  // closed set, and renderCoverSvg() draws them. Keeping it in the DB
+  // means every notebook card gets the same art without re-calling the
+  // LLM on each page load.
+  coverSpec: text('cover_spec'),
+});
+
+/**
+ * Thematic grouping of a notebook's sources, as JSON: [{title, sourceIds}].
+ *
+ * Regenerated lazily by lib/sourceGroups.ts. `signature` hashes the
+ * source set it was built from, so adding or re-summarising a source
+ * invalidates the cache without a manual purge.
+ */
+export const sourceGroups = sqliteTable('source_groups', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id')
+    .notNull()
+    .references(() => notebooks.id, { onDelete: 'cascade' }),
+  payload: text('payload').notNull(), // JSON SourceGroup[]
+  signature: text('signature').notNull(),
+  createdAt: text('created_at').notNull().default(isoNow),
 });
 
 export const sources = sqliteTable('sources', {
@@ -44,6 +67,12 @@ export const sources = sqliteTable('sources', {
   summary: text('summary'),
   summaryTopics: text('summary_topics'), // JSON-encoded string[] — SQLite has no array type
   summarizedAt: text('summarized_at'),
+  // URL of the source's own picture — og:image for a page, the video
+  // thumbnail for YouTube. The notebook cover is picked from this
+  // column, so a notebook looks like its material instead of wearing a
+  // generated abstraction. Nullable: PDFs have no cheap way to raster
+  // a first page here, and a page may have no og:image at all.
+  coverImage: text('cover_image'),
 });
 
 export const artifacts = sqliteTable('artifacts', {

@@ -10,6 +10,10 @@ import type {
   SearchAddBatchResponse,
   SearchPreviewResponse,
   Source,
+  SourceGroupsResponse,
+  YoutubeCookieImport,
+  YoutubeCookieRefresh,
+  YoutubeCookieStatus,
 } from './types';
 import type {
   AiEditDelta,
@@ -73,6 +77,28 @@ export const api = {
     http<Notebook>('/api/notebooks', { method: 'POST', body: JSON.stringify({ title }) }),
   deleteNotebook: (id: string) =>
     http<void>(`/api/notebooks/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Cover art URL for a notebook, for the card on the home screen.
+   *
+   * The endpoint answers with a redirect to a real picture from the
+   * notebook's sources (a page's og:image, a video's poster frame) and
+   * falls back to a generated SVG when no source offered one. Either
+   * way it never blocks, so the grid renders it as a plain <img>.
+   * `key` is the cover signature — it busts the browser's image cache
+   * when the art changes.
+   */
+  coverUrl: (id: string, key?: string | number) =>
+    `/api/notebooks/${id}/cover${key ? `?v=${encodeURIComponent(String(key))}` : ''}`,
+
+  /**
+   * Thematic sections for the sources panel. `refresh` forces a rebuild
+   * (the "Перегруппировать" button); the default reads the cached split.
+   */
+  getSourceGroups: (id: string, refresh = false) =>
+    http<SourceGroupsResponse>(
+      `/api/notebooks/${id}/source-groups${refresh ? '?refresh=true' : ''}`,
+    ),
 
   /**
    * SSE-streamed ingest of a URL source. Yields progress events; caller can
@@ -140,6 +166,17 @@ export const api = {
     http<Source>(`/api/notebooks/${notebookId}/sources/youtube`, {
       method: 'POST',
       body: JSON.stringify({ url, title }),
+    }),
+  youtubeCookies: () => http<YoutubeCookieStatus>('/api/youtube/cookies'),
+  refreshYoutubeCookies: (profilePath: string) =>
+    http<YoutubeCookieRefresh>(`/api/youtube/cookies/refresh`, {
+      method: 'POST',
+      body: JSON.stringify({ profilePath }),
+    }),
+  importYoutubeCookies: (tsv: string) =>
+    http<YoutubeCookieImport>('/api/youtube/cookies/import', {
+      method: 'POST',
+      body: JSON.stringify({ tsv }),
     }),
   uploadFileSource: async (notebookId: string, file: File): Promise<Source> => {
     const form = new FormData();

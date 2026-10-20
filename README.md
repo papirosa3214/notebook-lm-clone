@@ -12,6 +12,8 @@
 - **LLM providers:** Ollama (qwen3.6-27b-iq4-16k по умолчанию), Anthropic, OpenAI
 - **Парсинг:** html2text (URL → markdown), pdf-parse (PDF), mammoth (DOCX), yt-dlp (субтитры YouTube на русском)
 - **Cookies для YouTube:** `~/.config/yt.cookies.txt` (Netscape-формат, выгрузка из браузера) — без них yt-dlp упирается в «Sign in to confirm you're not a bot». Путь можно переопределить через `YT_COOKIES_PATH`.
+- **Обложки:** на карточке ноутбука — настоящая картинка из его источников (`og:image` страницы, постер видео YouTube). Если ни один источник картинки не дал, рисуется SVG-рецепт по теме ноутбука (`lib/coverArt.ts`).
+- **Тематические разделы:** источники в левой панели группируются LLM на 2–6 разделов, кэш по сигнатуре состава источников (`lib/sourceGroups.ts`). Разделы свёрчиваются, кнопка «Перегруппировать» пересобирает их.
 - **YouTube → ASR (опционально):** yt-dlp (внешний бинарь) скачивает аудио, локальный whisper.cpp `--server` распознаёт речь, ffmpeg нормализует в 16k mono wav. Используется когда субтитров на русском нет вовсе.
 - **Workspace:** pnpm monorepo (`apps/*` + `packages/*`)
 

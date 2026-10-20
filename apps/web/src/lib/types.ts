@@ -23,6 +23,23 @@ export interface Notebook {
   readySourceCount?: number;
 }
 
+/** One named cluster of sources, as returned by /source-groups.
+ *  Source ids appear in exactly one group — the server guarantees it so
+ *  the scope checkboxes stay a partition. */
+export interface SourceGroup {
+  title: string;
+  sourceIds: string[];
+}
+
+export interface SourceGroupsResponse {
+  groups: SourceGroup[];
+  signature: string;
+  /** 'llm' = clustered by the model, 'fallback' = grouped by shared
+   *  topic chips, 'none' = not enough sources to split. */
+  strategy: 'llm' | 'fallback' | 'none';
+  cached: boolean;
+}
+
 export interface Source {
   id: string;
   notebookId: string;
@@ -164,3 +181,39 @@ export type DeepResearchDelta =
   | { type: 'token'; text: string }
   | { type: 'done'; artifactId: string; sourceCount: number; citationCount: number }
   | { type: 'error'; message: string };
+
+// YouTube cookies (mirrors API's /api/youtube/cookies*)
+// The API keeps the cookie file on disk; the UI only shows its state and
+// triggers a refresh from a browser profile.
+export interface YoutubeCookieStatus {
+  path: string;
+  exists: boolean;
+  updatedAt: string | null;
+  total: number;
+  authCookies: string[];
+  missing: string[];
+  /** The file exists and carries every cookie a live session needs. */
+  usable: boolean;
+  /** Browser profiles that can be used as a cookie source. */
+  browsers: YoutubeBrowserCookieSource[];
+}
+
+export interface YoutubeBrowserCookieSource {
+  label: string;
+  profilePath: string;
+}
+
+export interface YoutubeCookieRefresh {
+  ok: boolean;
+  message: string;
+  undecrypted: number | null;
+  extracted: number | null;
+  status: Omit<YoutubeCookieStatus, 'browsers'>;
+}
+
+export interface YoutubeCookieImport {
+  path: string;
+  imported: number;
+  skipped: number;
+  status: Omit<YoutubeCookieStatus, 'browsers'>;
+}

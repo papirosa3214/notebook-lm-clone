@@ -136,18 +136,25 @@ async function stackExchange(query: string, n: number): Promise<WebSearchResult[
     }));
 }
 
-async function wikipedia(query: string, n: number): Promise<WebSearchResult[]> {
+async function wikipedia(
+  query: string,
+  n: number,
+  lang: 'en' | 'ru',
+): Promise<WebSearchResult[]> {
   const data = await fetchJson<{
     query?: { search?: Array<{ title?: string; snippet?: string; pageid?: number }> };
   }>(
-    'https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*' +
+    `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*` +
       `&srlimit=${n}&srsearch=${encodeURIComponent(query)}`,
   );
   return (data?.query?.search ?? [])
     .filter((s) => s.title && s.pageid)
     .map((s) => ({
-      title: s.title!,
-      url: `https://en.wikipedia.org/?curid=${s.pageid}`,
+      title: stripTags(s.title!),
+      // Link the article itself, not `?curid=`: the latter is a
+      // special-redirect URL that some fetchers resolve slowly or not
+      // at all, and the page never gets ingested.
+      url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(s.title!.replace(/ /g, '_'))}`,
       snippet: stripTags(s.snippet ?? ''),
     }));
 }
@@ -201,6 +208,61 @@ async function arxiv(query: string, n: number): Promise<WebSearchResult[]> {
   return out;
 }
 
+// ============ Relevance filter for the fallback path ============
+
+/** Words that carry no topical signal — matching them proves nothing. */
+const STOP = new Set([
+  'что','как','для','этот','эта','эти','того','так','при','про','или','если','все','весь',
+  'быть','есть','более','менее','очень','также','their','the','and','for','with','that','this',
+  'from','are','was','were','will','can','how','what','which','about','into','your','you',
+]);
+
+/** Content words of the query, longest first so prefixes match properly. */
+function queryTerms(query: string): string[] {
+  const words = query
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]{3,}/gu)
+    ?.filter((w) => !STOP.has(w)) ?? [];
+  return [...new Set(words)].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Does this hit actually talk about the query?
+ *
+ * Prefix matching, because the same idea is written several ways across
+ * languages and forms: "криптография" / "криптографии" / "криптограф".
+ * Terms shorter than 4 characters are matched whole — "блокчейн" vs
+ * "блок" must not count as a hit.
+ */
+function matchesTerm(text: string, term: string): boolean {
+  if (term.length < 4) return text.includes(term);
+  if (text.includes(term)) return true;
+  const stem = term.length >= 6 ? term.slice(0, 6) : term;
+  return stem.length >= 4 && text.includes(stem);
+}
+
+/**
+ * Drop fallback hits that ignore the question.
+ *
+ * The fallback APIs answer *anything*: arxiv matches `all:` and happily
+ * returns papers about speech recognition for a question about quantum
+ * cryptography. Merged unfiltered, those five confident wrong answers
+ * crowd out the good ones and the report cites nothing relevant. A short
+ * question is better served by zero hits than by wrong ones — the caller
+ * says "ничего не нашлось", which is true and actionable.
+ */
+function dropIrrelevant(hits: WebSearchResult[], query: string): WebSearchResult[] {
+  const terms = queryTerms(query);
+  if (terms.length === 0) return hits;
+  // Half the query, rounded down but never below one: a two-word query
+  // still needs just one match, a long one needs substance.
+  const minHits = Math.max(1, Math.floor(terms.length / 2));
+  return hits.filter((h) => {
+    const text = `${h.title} ${h.snippet} ${h.url}`.toLowerCase();
+    return terms.filter((t) => matchesTerm(text, t)).length >= minHits;
+  });
+}
+
 // ============ Merge ============
 
 /**
@@ -234,11 +296,19 @@ export async function searchWeb(query: string, maxResults = 5): Promise<WebSearc
   const groups = await Promise.all([
     hackerNews(q, maxResults),
     stackExchange(q, maxResults),
-    wikipedia(q, maxResults),
+    // Both language editions: DuckDuckGo — the only engine that ranks a
+    // Russian query against Russian pages — currently answers 202, so
+    // without ru-wiki every Russian question ends up with nothing.
+    wikipedia(q, maxResults, 'en'),
+    wikipedia(q, maxResults, 'ru'),
     github(q, maxResults),
     arxiv(q, maxResults),
   ]);
-  return interleave(groups, maxResults);
+  // These APIs answer anything, so filter before merging — otherwise one
+  // chatty source (arxiv especially) fills the whole budget with papers
+  // that have nothing to do with the question.
+  const relevant = groups.map((g) => dropIrrelevant(g, q));
+  return interleave(relevant, maxResults);
 }
 
 function stripTags(s: string): string {

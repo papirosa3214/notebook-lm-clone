@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest, FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { getDb, getRawSqlite } from '../db/index.js';
@@ -13,6 +13,7 @@ import { addSourceText, removeSource } from '../vectordb/client.js';
 import { buildTriplesForSourceId, removeTriplesForSource } from '../vectordb/graph.js';
 import { runIngest } from '../lib/ingestRun.js';
 import { summarizeSource } from '../lib/summarizeSource.js';
+import { ensureCoverSpec, hasSourcePicture } from '../lib/coverArt.js';
 import { autoPrepareEmbedding, autoReleaseEmbedding } from '../embedding/lifecycle.js';
 
 const AddUrlBody = z.object({
@@ -24,6 +25,31 @@ const STAGES_PROGRESS_UPDATES = true;
 
 function wantsStream(req: FastifyRequest): boolean {
   return (req.query as { stream?: string } | undefined)?.stream === '1';
+}
+
+/**
+ * Cover art is derived from the notebook's topics, so a new source makes
+ * the stored recipe stale. Chain this off the post-ingest summarize: the
+ * recipe needs `summaryTopics`, which only exist once summarizing is
+ * done, and the panel is already showing the new source by then.
+ *
+ * Skipped entirely when a source brought a real picture — that one is
+ * what the cover shows now, so re-rolling the fallback recipe would be
+ * an LLM call nobody sees.
+ *
+ * Free on a no-op: ensureCoverSpec hashes the topic set and skips the
+ * LLM when it still matches the stored signature.
+ */
+function refreshCoverForNotebook(
+  app: FastifyInstance,
+  notebookId: string,
+  provider: string,
+  model: string,
+): void {
+  if (hasSourcePicture(notebookId)) return;
+  void ensureCoverSpec(notebookId, { provider, model }).catch((err) => {
+    app.log.warn({ err, notebookId }, 'post-ingest cover refresh failed');
+  });
 }
 
 export const sourceRoutes: FastifyPluginAsync = async (app) => {
@@ -129,11 +155,12 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
           await autoPrepareEmbedding();
           try {
             emit.progress('fetching', 0.1, `Загружаю ${new URL(url).hostname}…`, localId);
-            const { markdown, title: fetchedTitle } = await fetchUrlToMarkdown(url);
+            const { markdown, title: fetchedTitle, coverImage } =
+              await fetchUrlToMarkdown(url);
 
             const finalTitle = title ?? fetchedTitle;
             db.update(sources)
-              .set({ title: finalTitle })
+              .set({ title: finalTitle, coverImage })
               .where(eq(sources.id, localId))
               .run();
 
@@ -174,6 +201,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
             }).catch((err) => {
               app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
             });
+
+            refreshCoverForNotebook(app, req.params.id, nb.defaultProvider, nb.defaultModel);
 
             // Fire-and-forget knowledge-graph extraction. Same reasoning as
             // summarize: a few seconds of LLM work, but the source is already
@@ -307,6 +336,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
           app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
         });
 
+        refreshCoverForNotebook(app, req.params.id, nb.defaultProvider, nb.defaultModel);
+
         // Fire-and-forget knowledge-graph extraction. see URL handler.
         void buildTriplesForSourceId({
           notebookId: req.params.id,
@@ -358,7 +389,14 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
           await autoPrepareEmbedding();
           try {
             emit.progress('fetching', 0.1, 'Загружаю субтитры…', localId);
-            const { text, title: fetchedTitle } = await fetchYouTubeTranscript(parsed.data.url);
+            const { text, title: fetchedTitle, coverImage } =
+              await fetchYouTubeTranscript(parsed.data.url);
+            if (coverImage) {
+              db.update(sources)
+                .set({ coverImage })
+                .where(eq(sources.id, localId))
+                .run();
+            }
             emit.progress('embedding', 0.5, 'Создаю embeddings…', localId);
             await addSourceText(
               {
@@ -390,6 +428,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
             }).catch((err) => {
               app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
             });
+
+            refreshCoverForNotebook(app, req.params.id, nb.defaultProvider, nb.defaultModel);
 
             // Fire-and-forget knowledge-graph extraction. see URL handler
             // for rationale; same defaults.
@@ -506,6 +546,8 @@ export const sourceRoutes: FastifyPluginAsync = async (app) => {
             }).catch((err) => {
               app.log.warn({ err, sourceId: localId }, 'post-ingest summarize failed');
             });
+
+            refreshCoverForNotebook(app, req.params.id, nb.defaultProvider, nb.defaultModel);
 
             void buildTriplesForSourceId({
               notebookId: req.params.id,

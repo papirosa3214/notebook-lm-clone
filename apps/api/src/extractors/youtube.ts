@@ -8,6 +8,7 @@ import {
   which,
   ytCookiesPath,
 } from './ytDlp.js';
+import { diagnoseYtFailure } from './ytCookies.js';
 
 /** Русский — единственный нужный язык. Другие дорожки не качаем никогда. */
 const SUB_LANG = 'ru';
@@ -25,16 +26,31 @@ const SUB_TIMEOUT_MS = 3 * 60 * 1000;
 export async function fetchYouTubeTranscript(urlOrId: string): Promise<{
   text: string;
   title: string;
+  coverImage: string | null;
 }> {
   const videoId = extractVideoId(urlOrId);
   if (!videoId) {
     throw new Error(`Не получилось распознать YouTube-ссылку: ${urlOrId}`);
   }
 
-  const ytDlp = await which('yt-dlp');
-  if (ytDlp) return fetchViaYtDlp(ytDlp, videoId);
+  // The thumbnail is derived from the id — no extra request, and it is
+  // the video's real poster frame, which is exactly what a cover wants.
+  const coverImage = youtubeThumbnailUrl(videoId);
 
-  return fetchViaLibrary(videoId);
+  const ytDlp = await which('yt-dlp');
+  if (ytDlp) return { ...(await fetchViaYtDlp(ytDlp, videoId)), coverImage };
+
+  return { ...(await fetchViaLibrary(videoId)), coverImage };
+}
+
+/**
+ * Poster frame for a video id. `hqdefault` always exists even for
+ * videos with no custom thumbnail; `maxresdefault` is absent on old
+ * uploads, so it is only a progressive upgrade handled by the client
+ * falling back on error — we store the reliable one.
+ */
+export function youtubeThumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 }
 
 async function fetchViaYtDlp(ytDlp: string, videoId: string): Promise<{
@@ -69,7 +85,7 @@ async function fetchViaYtDlp(ytDlp: string, videoId: string): Promise<{
 
     const { stdout, stderr, code } = await runProc(ytDlp, args, SUB_TIMEOUT_MS);
     if (code !== 0) {
-      throw new Error(ytDlpFailure(videoId, stderr, code));
+      throw new Error(`YouTube не отдал субтитры (${videoId}): ${await diagnoseYtFailure(stderr)}`);
     }
 
     const files = (await readdir(dir)).filter((f) => f.endsWith(`.${SUB_LANG}.json3`));
@@ -128,18 +144,6 @@ export function parseJson3Transcript(raw: string): string {
     lines.push(`[${formatTs(sec)}] ${texts.join(' ')}`);
   }
   return lines.join('\n\n');
-}
-
-/** Причина отказа yt-dlp — показываем как есть, без приукрашивания. */
-function ytDlpFailure(videoId: string, stderr: string, code: number | null): string {
-  const reason = lastErrorLine(stderr) ?? `yt-dlp завершился с кодом ${code}`;
-  let hint = '';
-  if (/cookies are no longer valid/i.test(stderr)) {
-    hint = ' Файл cookies.txt устарел: YouTube ротировал сессию, выгрузи куки заново.';
-  } else if (/not a bot/i.test(stderr)) {
-    hint = ' Бот-проверка YouTube. Помогают свежие куки (YT_COOKIES_PATH или ~/.config/yt.cookies.txt).';
-  }
-  return `YouTube не отдал субтитры (${videoId}): ${reason}${hint}`;
 }
 
 /* ------------------------------------------------------------------ */
